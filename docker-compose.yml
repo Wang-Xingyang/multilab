@@ -1,0 +1,35 @@
+# MultiLab 部署配置
+# 用途: 别人 clone 仓库后,只需 docker-compose up --build 即可启动
+# 关键: 挂载 /var/run/docker.sock 让后端容器能管理执行容器
+
+services:
+  multilab-server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      # ★ 关键: 让后端能用 dockerode 管理执行容器
+      - /var/run/docker.sock:/var/run/docker.sock
+      # 教程和 Dockerfile 只读挂载
+      - ./tutorials:/app/tutorials:ro
+      - ./docker:/app/docker:ro
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - EXEC_IMAGE=multilab/os:latest
+      - CONTAINER_NAME=multilab-session
+    restart: unless-stopped
+    depends_on:
+      build-exec-image:
+        condition: service_completed_successfully
+
+  # 构建执行镜像的初始化容器,只跑一次
+  build-exec-image:
+    image: docker:cli
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker:/docker:ro
+    command: docker build -t multilab/os:latest -f /docker/os.Dockerfile /docker
+    restart: "no"

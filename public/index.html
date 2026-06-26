@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MultiLab</title>
+
+<!-- CDN: Monaco Editor (VS Code 同款) -->
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.50.0/min/vs/loader.js"></script>
+<!-- CDN: xterm.js 终端模拟器 -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js"></script>
+<!-- CDN: marked.js — Markdown 渲染 (v9.x 最后一个支持 <script> 全局变量的版本) -->
+<script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+
+<style>
+  :root {
+    --bg: #1e1e1e;
+    --bg-panel: #252526;
+    --bg-elev: #2d2d2d;
+    --border: #3c3c3c;
+    --text: #d4d4d4;
+    --text-dim: #8a8a8a;
+    --accent: #0e639c;
+    --accent-hover: #1177bb;
+    --success: #4ec9b0;
+    --error: #f48771;
+    --warn: #dcdcaa;
+  }
+  :root[data-theme="light"] {
+    --bg: #ffffff;
+    --bg-panel: #f8f8f8;
+    --bg-elev: #ffffff;
+    --border: #e0e0e0;
+    --text: #1e1e1e;
+    --text-dim: #6a6a6a;
+    --accent: #0066b8;
+    --accent-hover: #005a9e;
+    --success: #098658;
+    --error: #d73a49;
+    --warn: #b58900;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 14px;
+    overflow: hidden;
+  }
+  button { font-family: inherit; cursor: pointer; }
+
+  /* === 顶部栏 === */
+  header {
+    height: 48px;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    gap: 12px;
+  }
+  header .brand {
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: 0.3px;
+  }
+  header .brand .dot { color: var(--success); }
+  header select {
+    background: var(--bg-elev);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 13px;
+  }
+  header .spacer { flex: 1; }
+  header button {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 13px;
+    transition: all 0.15s;
+  }
+  header button:hover { background: var(--bg-elev); color: var(--text); }
+  header .run-btn {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+    font-weight: 500;
+  }
+  header .run-btn:hover { background: var(--accent-hover); }
+  header .run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* === 主布局 === */
+  main {
+    display: flex;
+    height: calc(100vh - 48px);
+  }
+
+  /* 左侧:教程 */
+  .tutorial-panel {
+    width: 42%;
+    min-width: 360px;
+    max-width: 640px;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-panel);
+  }
+  .tutorial-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 32px;
+    line-height: 1.7;
+  }
+  .tutorial-content h1 { font-size: 22px; margin-bottom: 12px; }
+  .tutorial-content h2 { font-size: 18px; margin: 24px 0 8px; }
+  .tutorial-content h3 { font-size: 15px; margin: 20px 0 6px; }
+  .tutorial-content p { margin: 8px 0; }
+  .tutorial-content ul, .tutorial-content ol { margin: 8px 0 8px 24px; }
+  .tutorial-content li { margin: 4px 0; }
+  .tutorial-content code {
+    background: var(--bg-elev);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: "JetBrains Mono", "Consolas", monospace;
+    font-size: 12.5px;
+    color: var(--warn);
+  }
+  .tutorial-content pre {
+    background: var(--bg-elev);
+    padding: 12px 16px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 12px 0;
+  }
+  .tutorial-content pre code {
+    background: transparent;
+    padding: 0;
+    color: var(--text);
+  }
+  .tutorial-content blockquote {
+    border-left: 3px solid var(--accent);
+    padding-left: 12px;
+    color: var(--text-dim);
+    margin: 12px 0;
+  }
+  .tutorial-nav {
+    border-top: 1px solid var(--border);
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg-panel);
+  }
+  .tutorial-nav .step-info {
+    color: var(--text-dim);
+    font-size: 12px;
+    flex: 1;
+  }
+  .tutorial-nav button {
+    background: var(--bg-elev);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 5px 12px;
+    font-size: 13px;
+  }
+  .tutorial-nav button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* 右侧:编辑器 + 终端 */
+  .workspace-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  .editor-wrap {
+    flex: 1.2;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+  }
+  #monaco {
+    position: absolute;
+    inset: 0;
+  }
+  .terminal-wrap {
+    flex: 1;
+    background: #000;
+    padding: 8px 10px;
+    overflow: hidden;
+    position: relative;
+  }
+  .terminal-wrap .term-label {
+    position: absolute;
+    top: 6px;
+    right: 10px;
+    color: #666;
+    font-size: 11px;
+    z-index: 10;
+    pointer-events: none;
+  }
+  #terminal { height: 100%; }
+
+  /* === 状态条 === */
+  .status-bar {
+    position: fixed;
+    bottom: 0;
+    right: 0;
+    padding: 3px 10px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 11px;
+    border-top-left-radius: 4px;
+    z-index: 100;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .status-bar.show { opacity: 1; }
+
+  /* === Toast === */
+  .toast {
+    position: fixed;
+    top: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-elev);
+    color: var(--text);
+    padding: 10px 20px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    z-index: 200;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    opacity: 0;
+    transition: opacity 0.3s, transform 0.3s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.error { border-color: var(--error); color: var(--error); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">Multi<span class="dot">·</span>Lab</div>
+  <select id="tutorial-select"><option value="">加载中...</option></select>
+  <div class="spacer"></div>
+  <button id="theme-btn" title="切换主题">🌙</button>
+  <button id="interrupt-btn" title="中断 (Ctrl+C)">■</button>
+  <button id="run-btn" class="run-btn" title="运行 (Ctrl+Enter)">▶ 运行</button>
+</header>
+
+<main>
+  <section class="tutorial-panel">
+    <div class="tutorial-content" id="tutorial-content">
+      <p style="color: var(--text-dim)">正在加载教程...</p>
+    </div>
+    <div class="tutorial-nav">
+      <button id="prev-step">← 上一步</button>
+      <span class="step-info" id="step-info">—</span>
+      <button id="next-step">下一步 →</button>
+    </div>
+  </section>
+
+  <section class="workspace-panel">
+    <div class="editor-wrap"><div id="monaco"></div></div>
+    <div class="terminal-wrap">
+      <span class="term-label">terminal</span>
+      <div id="terminal"></div>
+    </div>
+  </section>
+</main>
+
+<div class="status-bar" id="status-bar"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ========== 全局状态 ==========
+let ws = null;
+let editor = null;
+let term = null;
+let fitAddon = null;
+let currentTutorial = null;
+let currentStep = 0;
+let theme = localStorage.getItem('multilab-theme') || 'dark';
+
+// ========== 主题 ==========
+function applyTheme(t) {
+  theme = t;
+  document.documentElement.setAttribute('data-theme', t);
+  document.getElementById('theme-btn').textContent = t === 'dark' ? '🌙' : '☀️';
+  localStorage.setItem('multilab-theme', t);
+  if (editor) editor.updateOptions({ theme: t === 'dark' ? 'vs-dark' : 'vs' });
+}
+applyTheme(theme);
+document.getElementById('theme-btn').onclick = () => applyTheme(theme === 'dark' ? 'light' : 'dark');
+
+// ========== Toast ==========
+function toast(msg, isError = false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show' + (isError ? ' error' : '');
+  setTimeout(() => el.className = 'toast', 2500);
+}
+function status(msg) {
+  const el = document.getElementById('status-bar');
+  el.textContent = msg;
+  el.className = 'status-bar show';
+  setTimeout(() => el.className = 'status-bar', 1500);
+}
+
+// ========== Monaco ==========
+require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.50.0/min/vs' } });
+require(['vs/editor/editor.main'], () => {
+  editor = monaco.editor.create(document.getElementById('monaco'), {
+    value: '// Loading tutorial...',
+    language: 'c',
+    theme: theme === 'dark' ? 'vs-dark' : 'vs',
+    fontSize: 14,
+    fontFamily: '"JetBrains Mono", "Consolas", monospace',
+    automaticLayout: true,
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    tabSize: 4,
+  });
+  loadTutorialList();
+});
+
+// Ctrl+Enter 运行
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    e.preventDefault();
+    runCode();
+  }
+});
+document.getElementById('run-btn').onclick = runCode;
+document.getElementById('interrupt-btn').onclick = () => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'interrupt' }));
+  }
+};
+
+// ========== xterm ==========
+term = new Terminal({
+  fontFamily: '"JetBrains Mono", "Consolas", monospace',
+  fontSize: 13,
+  cursorBlink: true,
+  theme: {
+    background: '#000000',
+    foreground: '#e0e0e0',
+    cursor: '#e0e0e0',
+  },
+});
+fitAddon = new FitAddon.FitAddon();
+term.loadAddon(fitAddon);
+term.loadAddon(new WebLinksAddon.WebLinksAddon());
+term.open(document.getElementById('terminal'));
+fitAddon.fit();
+window.addEventListener('resize', () => fitAddon.fit());
+
+term.onData((data) => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'input', data }));
+  }
+});
+
+// ========== WebSocket ==========
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => status('已连接');
+  ws.onmessage = (e) => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    if (msg.type === 'output') {
+      term.write(msg.data);
+    } else if (msg.type === 'exit') {
+      term.write(`\r\n\x1b[90m[进程退出, code=${msg.code}]\x1b[0m\r\n`);
+    } else if (msg.type === 'status') {
+      status(msg.message);
+    } else if (msg.type === 'error') {
+      toast(msg.message, true);
+      term.write(`\r\n\x1b[31m[错误] ${msg.message}\x1b[0m\r\n`);
+    }
+  };
+  ws.onclose = () => {
+    status('连接断开,3 秒后重连');
+    setTimeout(connectWS, 3000);
+  };
+}
+connectWS();
+
+// ========== 教程加载 ==========
+async function loadTutorialList() {
+  try {
+    const res = await fetch('/api/tutorials');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { tutorials } = await res.json();
+    const sel = document.getElementById('tutorial-select');
+    sel.innerHTML = tutorials.map(t =>
+      `<option value="${t.id}">${t.title} (${t.language}, ${t.steps} 步)</option>`
+    ).join('');
+    sel.onchange = () => loadTutorial(sel.value);
+    if (tutorials.length > 0) loadTutorial(tutorials[0].id);
+  } catch (e) {
+    console.error('[MultiLab] 加载教程列表失败:', e);
+    document.getElementById('tutorial-content').innerHTML =
+      `<p style="color: var(--error)">⚠ 加载教程列表失败: ${e.message}</p>
+       <p style="color: var(--text-dim);margin-top:8px">请确认后端服务运行在 <code>http://localhost:${location.port || 3001}</code></p>`;
+  }
+}
+
+async function loadTutorial(id) {
+  try {
+    const res = await fetch(`/api/tutorials/${id}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => '')}`);
+    currentTutorial = await res.json();
+    if (!currentTutorial || !currentTutorial.steps) throw new Error('无效的教程数据');
+    currentStep = 0;
+    renderStep();
+  } catch (e) {
+    console.error(`[MultiLab] 加载教程 ${id} 失败:`, e);
+    document.getElementById('tutorial-content').innerHTML =
+      `<p style="color: var(--error)">⚠ 加载教程失败: ${e.message}</p>
+       <p style="color: var(--text-dim);margin-top:8px">按 F12 打开开发者工具查看详细错误</p>`;
+  }
+}
+
+function renderStep() {
+  if (!currentTutorial || !currentTutorial.steps || !currentTutorial.steps.length) {
+    document.getElementById('tutorial-content').innerHTML =
+      '<p style="color: var(--text-dim)">未加载教程或教程数据为空</p>';
+    return;
+  }
+  const step = currentTutorial.steps[currentStep];
+  if (!step) {
+    document.getElementById('tutorial-content').innerHTML =
+      `<p style="color: var(--warn)">步骤 ${currentStep + 1} 不存在 (共 ${currentTutorial.steps.length} 步)</p>`;
+    return;
+  }
+
+  // 教程内容
+  document.getElementById('tutorial-content').innerHTML = marked.parse(step.instructions || '');
+
+  // 编辑器: 如果该步有 files,加载第一个文件的初始内容
+  if (step.files && step.files.length > 0) {
+    const file = step.files[0];
+    if (editor) {
+      editor.setValue(file.content);
+      monaco.editor.setModelLanguage(editor.getModel(), file.language || currentTutorial.language || 'c');
+    }
+  }
+
+  // 步骤导航
+  document.getElementById('step-info').textContent =
+    `步骤 ${currentStep + 1} / ${currentTutorial.steps.length} — ${step.title || ''}`;
+  document.getElementById('prev-step').disabled = currentStep === 0;
+  document.getElementById('next-step').disabled = currentStep === currentTutorial.steps.length - 1;
+}
+
+document.getElementById('prev-step').onclick = () => {
+  if (currentStep > 0) { currentStep--; renderStep(); }
+};
+document.getElementById('next-step').onclick = () => {
+  if (currentTutorial && currentStep < currentTutorial.steps.length - 1) {
+    currentStep++; renderStep();
+  }
+};
+
+// ========== 运行 ==========
+function runCode() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    toast('WebSocket 未连接', true);
+    return;
+  }
+  if (!currentTutorial) return;
+
+  const step = currentTutorial.steps[currentStep];
+  const file = (step.files && step.files[0]) || {};
+  const code = editor.getValue();
+  const filePath = `/home/student/workspace/${file.name || 'main.c'}`;
+  const cmd = step.run_cmd ||
+    (currentTutorial.language === 'c'
+      ? `gcc ${filePath} -o /tmp/a.out -Wall && /tmp/a.out`
+      : currentTutorial.language === 'node'
+        ? `node ${filePath}`
+        : `bash ${filePath}`);
+
+  term.clear();
+  term.write(`\x1b[90m$ ${cmd}\x1b[0m\r\n`);
+  ws.send(JSON.stringify({
+    type: 'run',
+    code,
+    filePath,
+    cmd,
+  }));
+}
+</script>
+</body>
+</html>

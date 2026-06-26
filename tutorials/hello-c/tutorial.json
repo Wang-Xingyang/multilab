@@ -1,0 +1,44 @@
+{
+  "id": "hello-c",
+  "title": "Hello, C — 你的第一个 C 程序",
+  "description": "OS 课入门: 写一个 C 程序,用 gcc 编译运行,体验 MultiLab 的工作流。",
+  "language": "c",
+  "steps": [
+    {
+      "title": "第一个 C 程序",
+      "instructions": "# Hello, C\n\n欢迎来到 **MultiLab** —— 你的本地交互式学习环境。\n\n右侧编辑器里已经准备好了一个最简单的 C 程序。点右上角的 **▶ 运行** 按钮(或按 `Ctrl+Enter`),看看会发生什么。\n\n## 你会学到\n\n- C 程序的基本结构(`#include` / `main` / `return`)\n- `printf` 输出到 stdout\n- 如何用 `gcc` 编译并运行\n\n## 试试这个\n\n1. 改 `name` 变量的值,改成你的名字\n2. 把 `printf` 里的格式化字符串改一下\n3. 再点运行,观察终端输出\n\n> **提示**: 终端支持交互式输入 —— 试试写一个 `scanf` 读用户输入的程序。\n",
+      "files": [
+        {
+          "name": "hello.c",
+          "language": "c",
+          "content": "#include <stdio.h>\n\nint main(void) {\n    const char *name = \"CS Student\";\n    printf(\"Hello, %s!\\n\", name);\n    printf(\"Welcome to MultiLab.\\n\");\n    \n    // TODO: 把 name 改成你的名字,再点运行\n    return 0;\n}\n"
+        }
+      ],
+      "run_cmd": "gcc /home/student/workspace/hello.c -o /tmp/a.out -Wall && /tmp/a.out"
+    },
+    {
+      "title": "命令行参数与循环",
+      "instructions": "# 命令行参数\n\nC 程序的 `main` 可以接收命令行参数:\n\n```c\nint main(int argc, char *argv[]) {\n    // argc = 参数个数(含程序名)\n    // argv[i] = 第 i 个参数(字符串)\n}\n```\n\n## 任务\n\n右侧代码会打印所有传入的参数。直接运行看看效果 —— 你会看到 `argv[0]` 是程序路径本身。\n\n## 进阶\n\n试着在终端里直接输入:\n```\n/tmp/a.out hello world 123\n```\n观察 `argc` 和 `argv` 的变化。MultiLab 的终端是真终端,支持任意交互。\n",
+      "files": [
+        {
+          "name": "args.c",
+          "language": "c",
+          "content": "#include <stdio.h>\n\nint main(int argc, char *argv[]) {\n    printf(\"argc = %d\\n\", argc);\n    for (int i = 0; i < argc; i++) {\n        printf(\"argv[%d] = %s\\n\", i, argv[i]);\n    }\n    return 0;\n}\n"
+        }
+      ],
+      "run_cmd": "gcc /home/student/workspace/args.c -o /tmp/a.out -Wall && /tmp/a.out foo bar baz"
+    },
+    {
+      "title": "用 gdb 调试",
+      "instructions": "# 交互式调试器 gdb\n\nOS 课的核心技能之一是 **调试**。MultiLab 的终端是真 TTY,支持完整的 gdb 交互。\n\n## 试试这个\n\n右侧代码有一个**故意埋的 bug**:`sum` 没初始化,会是垃圾值。运行看看奇怪的结果,然后用 gdb 单步调试找出原因。\n\n## 操作步骤\n\n1. 点 **运行** 编译程序\n2. 在终端里输入:\n   ```\n   gdb /tmp/a.out\n   ```\n3. 进入 gdb 后:\n   - `break main` — 在 main 设断点\n   - `run` — 启动程序\n   - `next` — 单步执行\n   - `print sum` — 查看变量值\n   - `quit` — 退出 gdb\n\n> **关键**: gdb 是交互式的,MultiLab 的终端必须能处理 TTY 信号 —— 这正是 Docker `exec` + `Tty:true` 的价值。\n",
+      "files": [
+        {
+          "name": "buggy.c",
+          "language": "c",
+          "content": "#include <stdio.h>\n\nint main(void) {\n    int sum;  // BUG: 没初始化\n    for (int i = 1; i <= 10; i++) {\n        sum += i;\n    }\n    printf(\"sum = %d\\n\", sum);  // 会是垃圾值\n    return 0;\n}\n"
+        }
+      ],
+      "run_cmd": "gcc /home/student/workspace/buggy.c -o /tmp/a.out -Wall -g && /tmp/a.out && echo '--- 现在试 gdb /tmp/a.out ---'"
+    }
+  ]
+}
