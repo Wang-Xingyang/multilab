@@ -149,10 +149,10 @@ git push origin feature/my-feature
 
 ### 不要做的事
 
-- ❌ 不要直接 push 到 `main`（走 PR）
-- ❌ 不要在 commit message 加 `Co-Authored-By` 或 `Generated with ...`
-- ❌ 不要提交 `node_modules/`、`workspace/`、`sessions/`、`.env`
-- ❌ 不要 amend 已经 push 的 commit（除非只有你自己用这个分支）
+- 不要直接 push 到 `main`（走 PR）
+- 不要在 commit message 加 `Co-Authored-By` 或 `Generated with ...`
+- 不要提交 `node_modules/`、`workspace/`、`sessions/`、`.env`
+- 不要 amend 已经 push 的 commit（除非只有你自己用这个分支）
 
 ## 项目结构详解
 

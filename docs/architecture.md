@@ -72,32 +72,48 @@ SEBook 用 WebAssembly（v86 / Pyodide / WebContainer）在浏览器里跑代码
 
 ```javascript
 // 核心代码 (server/index.js)
+
+// 1. 启动时创建常驻容器
 const container = await docker.createContainer({
   name: 'multilab-session',
   Image: 'multilab/os:latest',
   Cmd: ['sleep', 'infinity'],
-  Tty: true,           // ★ 关键：真 TTY
+  Tty: true,           // 关键：真 TTY
   OpenStdin: true,
+  Hostname: 'tutorial',
 });
 
-const exec = await container.exec({
-  Cmd: ['bash', '-c', cmd],
+// 2. WebSocket 连接时启动常驻交互式 shell
+const shellExec = await container.exec({
+  Cmd: ['bash', '--login', '-i'],
   AttachStdin: true,
   AttachStdout: true,
   AttachStderr: true,
-  Tty: true,           // ★ 让 exec 也走 TTY
+  Tty: true,           // 让 exec 也走 TTY
+  User: 'student',
+  WorkingDir: '/home/student/workspace',
 });
-const stream = await exec.start({ hijack: true, stdin: true });
+const shellStream = await shellExec.start({ hijack: true, stdin: true });
+
+// 3. 用 demuxStream 解复用 hijack 流 (分离 stdout/stderr)
+const stdoutPipe = new PassThrough();
+const stderrPipe = new PassThrough();
+container.modem.demuxStream(shellStream, stdoutPipe, stderrPipe);
 
 // stream 是双向的：
-//   exec 输出 → stream 'data' → ws.send → term.write
-//   term 输入 → ws.on('input') → stream.write → exec stdin
-stream.on('data', chunk => ws.send(JSON.stringify({ type: 'output', data: chunk.toString() })));
+//   shell 输出 → stdoutPipe 'data' → ws.send → term.write
+//   term 输入 → ws.on('input') → shellStream.write → shell stdin
+stdoutPipe.on('data', chunk => ws.send(JSON.stringify({ type: 'output', data: chunk.toString() })));
 ```
 
-**关键点**：`exec.start({Tty: true})` 返回的是**双向流**，既能流回 stdout，也能注入 stdin。这让 gdb 这种交互式工具能完整工作——用户在终端里输入 `break main`，gdb 收到；gdb 输出提示符，终端显示。
+**关键点**：
 
-如果用 `docker run` 每次起新容器，会有几秒延迟，且无法保持状态（比如装过的包、改过的环境）。用常驻容器 + `exec` 是最优解。
+1. **常驻 shell**：连接建立时就启动 `bash --login -i`，贯穿整个会话。学员随时能敲 `ls`/`gcc`/`gdb`，不需要点运行才有终端。
+2. **`exec.start({hijack: true, Tty: true})` 返回双向流**，既能流回 stdout，也能注入 stdin。这让 gdb 这种交互式工具完整工作。
+3. **`demuxStream`**：Docker hijack 流是多路复用的（8 字节帧头），`container.modem.demuxStream()` 是官方提供的解复用方法，正确分离 stdout/stderr。
+4. **运行 = 注入命令**：点运行时，先把代码写入容器文件，再把 `run_cmd` 作为一行命令注入 shell stdin，shell 自己回显+执行+回 PS1。
+
+如果用 `docker run` 每次起新容器，会有几秒延迟，且无法保持状态。用常驻容器 + exec 是最优解。
 
 ### 为什么用 Monaco + xterm.js？
 
@@ -117,6 +133,8 @@ stream.on('data', chunk => ws.send(JSON.stringify({ type: 'output', data: chunk.
 
 ### 运行代码的完整流程
 
+当前实现使用**常驻交互式 shell**（不是每次 run 起新 exec）：
+
 ```
 用户点 "▶ 运行" (Ctrl+Enter)
     │
@@ -124,6 +142,7 @@ stream.on('data', chunk => ws.send(JSON.stringify({ type: 'output', data: chunk.
 前端 runCode()
     │ - 从 Monaco 读 code
     │ - 从 tutorial.json 读 run_cmd
+    │ - 先调 /api/fs/write 把代码写入容器 (独立 tee exec)
     │ - ws.send({ type:'run', code, filePath, cmd })
     ▼
 后端 wss.on('message')
@@ -138,17 +157,20 @@ container.exec({ Cmd: ['tee', filePath] })  ← 写代码到容器文件系统
     │ - stream.write(code); stream.end()
     │ - await sleep(100ms)  // 等写入完成
     ▼
-container.exec({ Cmd: ['bash', '-c', cmd] })  ← 真正执行
-    │ - start({ hijack:true, stdin:true })
-    │ - stream.on('data') → ws.send({ type:'output', data })
-    │ - stream.on('end')  → ws.send({ type:'exit', code })
+shellStream.write(cmd + '\n')  ← 往常驻 shell 注入命令
+    │ - shell 是连接建立时就启动的 bash --login -i
+    │ - shell 自己回显命令、执行、回到 PS1 提示符
+    ▼
+stdoutPipe.on('data') → ws.send({ type:'output', data })
+    │ - demuxStream 解复用后的干净 stdout
     ▼
 前端 ws.on('message')
     │ type === 'output' → term.write(data)
-    │ type === 'exit'   → term.write('[进程退出, code=N]')
 ```
 
 ### 终端输入的流程（交互式 gdb）
+
+常驻 shell 的 stdin 始终活跃，学员可以随时敲命令：
 
 ```
 用户在终端输入 "break main\n"
@@ -158,13 +180,27 @@ xterm term.onData(data)
     │ - ws.send({ type:'input', data })
     ▼
 后端 type === 'input'
-    │ - execStream.write(data)  ← 直接注入到 exec 的 stdin
+    │ - shellStream.write(data)  ← 直接注入到常驻 shell 的 stdin
     ▼
 gdb 收到 "break main\n"，输出响应
-    │ - execStream 'data' 事件
+    │ - stdoutPipe 'data' 事件
     │ - ws.send({ type:'output', data })
     ▼
 term.write(响应)
+```
+
+### 中断的流程（Ctrl+C）
+
+```
+用户点中断按钮或按 Ctrl+C
+    │
+    ▼
+ws.send({ type:'interrupt' })
+    │
+    ▼
+后端 shellStream.write('\x03')  ← 发 ETX 字符，不杀常驻 shell
+    │ - shell 里运行的进程收到 SIGINT
+    │ - shell 本身存活，回到 PS1 提示符
 ```
 
 ## 容器管理策略
@@ -226,7 +262,7 @@ wss.on('connection', (ws) => {
 1. **依赖 Docker** —— 用户必须装 Docker，门槛比纯前端高
 2. **单机** —— 当前实现不支持远程访问（可加 nginx 反代解决）
 3. **单容器** —— 多用户会互相干扰（未来扩展见上）
-4. **无持久化** —— 容器删除后代码丢失（未来加 volume 挂载）
+4. **代码不跨容器持久化** —— 容器删除后代码丢失（容器存活时可用保存按钮持久化到容器内；未来可加 volume 挂载到宿主）
 
 ## 相关文件
 

@@ -4,7 +4,7 @@
 
 ## 启动失败
 
-### ❌ `Error: listen EADDRINUSE: address already in use :::3000`
+### `Error: listen EADDRINUSE: address already in use :::3000`
 
 **原因**：3000 端口被占用。
 
@@ -27,7 +27,7 @@ kill -9 <PID>
 PORT=3001 npm start
 ```
 
-### ❌ `执行镜像 multilab/os:latest 未构建`
+### `执行镜像 multilab/os:latest 未构建`
 
 **原因**：还没构建执行容器镜像。
 
@@ -40,7 +40,7 @@ docker build -t multilab/os:latest -f docker/os.Dockerfile docker/
 
 构建一次约 5-10 分钟（取决于网速），之后会缓存。
 
-### ❌ `Cannot connect to the Docker daemon`
+### `Cannot connect to the Docker daemon`
 
 **原因**：Docker 没启动，或 WSL Integration 没开。
 
@@ -62,7 +62,7 @@ docker ps
 
 ## Docker 镜像拉取
 
-### ❌ `fork/exec /usr/bin/docker-credential-desktop.exe: exec format error`
+### `fork/exec /usr/bin/docker-credential-desktop.exe: exec format error`
 
 **原因**：Docker Desktop 在 Windows 侧写入了 `~/.docker/config.json`，但 WSL 内无法执行 `.exe`。
 
@@ -76,7 +76,7 @@ docker ps
 
 把 `credsStore` 的值清空即可。
 
-### ❌ 拉取超时 / `registry-1.docker.io` 不可达
+### 拉取超时 / `registry-1.docker.io` 不可达
 
 **原因**：国内网络访问 Docker Hub 不稳定。
 
@@ -121,7 +121,7 @@ docker pull hello-world
 
 ## 前端问题
 
-### ❌ 页面空白 / 卡在 "正在加载教程..."
+### 页面空白 / 卡在 "正在加载教程..."
 
 **原因**：很可能是 JS 报错。按 F12 打开开发者工具看 Console。
 
@@ -134,10 +134,10 @@ docker pull hello-world
 **解决**：降级到 `marked@9.x`。编辑 `public/index.html`：
 
 ```html
-<!-- ❌ 错误：v12+ 不暴露全局变量 -->
+<!-- 错误：v12+ 不暴露全局变量 -->
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 
-<!-- ✅ 正确：v9.x 最后一个支持 UMD 的版本 -->
+<!-- 正确：v9.x 最后一个支持 UMD 的版本 -->
 <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
 ```
 
@@ -169,7 +169,7 @@ Cmd+Shift+R   (Mac)
 
 或开 DevTools → Network → 勾选 "Disable cache"。
 
-### ❌ 终端显示 "连接断开,3 秒后重连"
+### 终端显示 "连接断开,3 秒后重连"
 
 **原因**：WebSocket 连不上。
 
@@ -187,7 +187,7 @@ wscat -c ws://localhost:3000/ws
 # 3. 看后端日志有没有报错
 ```
 
-### ❌ 点运行没反应
+### 点运行没反应
 
 **排查**：
 
@@ -204,23 +204,23 @@ gcc /home/student/workspace/hello.c -o /tmp/a.out && /tmp/a.out
 
 ## WSL 特定问题
 
-### ❌ `wsl bash -c "node --version"` 报 node not found
+### `wsl bash -c "node --version"` 报 node not found
 
 **原因**：非交互式 shell 不加载 `~/.bashrc`，nvm 初始化脚本不执行。
 
 **解决**：用 `bash -lic`（login + interactive + command）：
 
 ```bash
-# ❌ 不行
+# 不行
 wsl bash -c "node --version"
 
-# ✅ 可以
+# 可以
 wsl bash -lic "node --version"
 ```
 
 **永久解决**：把 nvm 初始化加到 `~/.profile` 或 `~/.bash_profile`（login shell 会读）。
 
-### ❌ 在 Windows 原生开发，Docker 编译巨慢
+### 在 Windows 原生开发，Docker 编译巨慢
 
 **原因**：Docker Desktop 在 Windows 原生挂载走 9P 协议，跨文件系统性能差。
 
@@ -237,7 +237,7 @@ code .
 
 ## 容器问题
 
-### ❌ `docker exec` 报 `container not running`
+### `docker exec` 报 `container not running`
 
 **原因**：`multilab-session` 容器停了。
 
@@ -255,7 +255,7 @@ docker rm -f multilab-session
 # 然后重启后端，会自动创建新容器
 ```
 
-### ❌ 容器内编译报 `permission denied`
+### 容器内编译报 `permission denied`
 
 **原因**：可能是以 root 写了文件，但 exec 以 `student` 用户执行。
 
@@ -272,7 +272,7 @@ docker exec -it multilab-session ls -la /home/student/workspace/
 docker exec -u root multilab-session chown -R student:student /home/student/workspace/
 ```
 
-### ❌ 容器越用越大
+### 容器越用越大
 
 **原因**：容器内的 `/tmp` 和 apt 缓存会累积。
 
@@ -289,7 +289,7 @@ docker rm -f multilab-session
 
 ## Git 问题
 
-### ❌ commit author 是 `wangxy <wangxy@multilab.local>`
+### commit author 是 `wangxy <wangxy@multilab.local>`
 
 **原因**：之前误用了 `git config --local` 覆盖了 author。
 
@@ -308,7 +308,7 @@ git log -1 --format='%an <%ae>'
 # 应该是你的 global config
 ```
 
-### ❌ commit 里有 `Co-Authored-By`
+### commit 里有 `Co-Authored-By`
 
 **解决**：amend 去掉：
 

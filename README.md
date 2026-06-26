@@ -24,10 +24,10 @@
 
 | 语言场景 | 镜像 | 状态 |
 |---|---|---|
-| **C / Shell (OS 课)** | `multilab/os:latest` | ✅ gcc / gdb / make / valgrind / strace / manpages |
-| Node.js | `multilab/node:latest` | 🔜 计划中 |
-| Python | `multilab/python:latest` | 🔜 计划中 |
-| Rust / Go | — | 🔜 计划中 |
+| **C / Shell (OS 课)** | `multilab/os:latest` | 已支持：gcc / gdb / make / valgrind / strace / manpages |
+| Node.js | `multilab/node:latest` | 计划中 |
+| Python | `multilab/python:latest` | 计划中 |
+| Rust / Go | — | 计划中 |
 
 ## 快速开始
 
@@ -53,7 +53,7 @@ cd server && npm start
 
 浏览器访问 **http://localhost:3000**
 
-> 🐳 **不想装 Node？** 直接 `docker-compose up --build`，连后端都容器化。详见 [部署指南](docs/deployment.md)。
+> **不想装 Node？** 直接 `docker-compose up --build`，连后端都容器化。详见 [部署指南](docs/deployment.md)。
 
 ## 工作流
 
@@ -95,11 +95,11 @@ multilab/
 
 ## 文档
 
-- 📐 [架构设计](docs/architecture.md) —— 技术选型、数据流、与 SEBook 对比
-- 🛠️ [开发指南](docs/development.md) —— 开发环境、Git 工作流、贡献流程
-- 📚 [教程编写指南](docs/tutorial-authoring.md) —— 如何添加新教程和新语言
-- 🐛 [故障排除](docs/troubleshooting.md) —— 常见问题与已知坑
-- 🚀 [部署指南](docs/deployment.md) —— Docker Compose 部署、生产环境配置
+- [架构设计](docs/architecture.md) —— 技术选型、数据流、与 SEBook 对比
+- [开发指南](docs/development.md) —— 开发环境、Git 工作流、贡献流程
+- [教程编写指南](docs/tutorial-authoring.md) —— 如何添加新教程和新语言
+- [故障排除](docs/troubleshooting.md) —— 常见问题与已知坑
+- [部署指南](docs/deployment.md) —— Docker Compose 部署、生产环境配置
 
 ## 开发约定
 

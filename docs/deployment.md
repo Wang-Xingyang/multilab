@@ -62,7 +62,7 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      # ★ 关键：让后端能用 dockerode 管理执行容器
+      # 关键：让后端能用 dockerode 管理执行容器
       - /var/run/docker.sock:/var/run/docker.sock
       # 教程和 Dockerfile 只读挂载
       - ./tutorials:/app/tutorials:ro
