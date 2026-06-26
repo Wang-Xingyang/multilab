@@ -431,3 +431,27 @@ cd server && npm start
 - [ ] instructions 里没有 emoji
 - [ ] 每个 step 只教一个概念
 - [ ] 代码里有 TODO 引导学员动手
+
+## 自动化工具：Tutorial Generator Skill
+
+项目内置了一个 WorkBuddy skill，可以自动生成和验证教程。详见 [tutorial-skill/README.md](tutorial-skill/README.md)。
+
+### 快速验证教程
+
+```bash
+python docs/tutorial-skill/scripts/validate_tutorial.py tutorials/my-tutorial/tutorial.json
+```
+
+检测项：JSON 语法、必填字段、language 枚举、run_cmd 文件路径匹配、输出位置、emoji、TODO 标记等。
+
+### 用模板起步
+
+```bash
+mkdir -p tutorials/my-tutorial
+cp docs/tutorial-skill/assets/tutorial-template.json tutorials/my-tutorial/tutorial.json
+# 编辑 JSON 内容
+```
+
+### 让 AI agent 自动写教程
+
+把 `docs/tutorial-skill/` 目录给 AI agent 参考，或安装为 WorkBuddy skill（见 tutorial-skill/README.md），之后直接说"帮我写个 XXX 教程"即可自动触发。
