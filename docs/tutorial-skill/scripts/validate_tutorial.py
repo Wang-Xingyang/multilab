@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
-"""MultiLab tutorial JSON validator.
+"""MultiLab tutorial validator (file-based structure).
 
-Checks a tutorial.json file for common errors:
-  - JSON syntax
-  - Required fields present
-  - language enum valid
-  - run_cmd file paths match files[].name
-  - No emoji in instructions/content
-  - Output binaries use /tmp/
-  - Common JSON escaping mistakes
+Checks a tutorial directory for common errors:
+  - multilab.json syntax and required fields
+  - step directory existence (steps/<id>/)
+  - instructions.md present in each step
+  - files/ directory present in each step
+  - command script sanity
+  - step id naming (semantic slug like 01-first-program, not bare numbers)
+  - optional chain id naming
+  - no emoji in instructions.md or source files
+  - output binaries use /tmp/ in run.sh
 
 Usage:
-  python validate_tutorial.py <path-to-tutorial.json>
+  python validate_tutorial.py <path-to-tutorial-dir>
+
+Exit code 0 = valid, non-0 = errors found.
 """
 
 import json
@@ -19,187 +23,191 @@ import re
 import sys
 from pathlib import Path
 
-VALID_LANGUAGES = {"c", "cpp", "javascript", "python", "shell", "rust", "go"}
-
-# Emoji and unicode symbol ranges to flag
-EMOJI_PATTERN = re.compile(
-    "["
-    "\U0001F000-\U0001FAFF"  # symbols & pictographs
-    "\U00002600-\U000027BF"  # misc symbols & dingbats
-    "\U00002B00-\U00002BFF"  # misc symbols & arrows
-    "\U00002190-\U000021FF"  # arrows
-    "\U00002700-\U000027BF"  # dingbats
-    "\U0000FE00-\U0000FE0F"  # variation selectors
-    "\U0001F1E0-\U0001F1FF"  # flags
-    "]",
-    flags=re.UNICODE,
+VALID_LANGUAGES = {'c', 'cpp', 'javascript', 'python', 'shell', 'rust', 'go'}
+VALID_INHERIT_MODES = {'template', 'previous_save', 'overlay_template'}
+VALID_COMMAND_TYPES = {'setup', 'run', 'test', 'check', 'preview', 'cleanup'}
+EMOJI_RE = re.compile(
+    '[\U0001F300-\U0001F9FF\U0001FA00-\U0001FAFF\U00002600-\U000027BF]'
 )
+STEP_ID_RE = re.compile(r'^\d{2}-[a-z][a-z0-9-]*$')
+CHAIN_ID_RE = re.compile(r'^[a-z][a-z0-9-]*$')
 
 
-def fail(msg, errors):
-    print(f"  FAIL: {msg}")
-    errors.append(msg)
+def check_no_emoji(text, label, errors):
+    found = EMOJI_RE.findall(text)
+    if found:
+        errors.append(f"{label}: contains emoji/unicode symbols: {' '.join(set(found))}")
 
 
-def warn(msg, warnings):
-    print(f"  WARN: {msg}")
-    warnings.append(msg)
+def resolve_package_path(tutorial_dir, rel_path, label, errors):
+    if not rel_path or Path(rel_path).is_absolute():
+        errors.append(f"{label}: script path must be package-relative")
+        return None
+    resolved = (tutorial_dir / rel_path).resolve()
+    try:
+        resolved.relative_to(tutorial_dir)
+    except ValueError:
+        errors.append(f"{label}: script path escapes tutorial directory")
+        return None
+    return resolved
 
 
-def check_required(obj, required, path, errors):
-    """Check that all required keys exist in obj."""
-    ok = True
-    for key in required:
-        if key not in obj:
-            print(f"  FAIL: {path}.{key} is required but missing")
-            errors.append(f"{path}.{key} missing")
-            ok = False
-    return ok
+def validate_script(script_path, label, language, errors, warnings, command_type=None):
+    if not script_path or not script_path.exists():
+        errors.append(f"{label}: script file does not exist")
+        return
+
+    script_text = script_path.read_text(encoding='utf-8')
+    check_no_emoji(script_text, label, errors)
+    if language in ('c', 'cpp') and ('gcc' in script_text or 'g++' in script_text):
+        if command_type == 'run' and '/home/student/workspace/' not in script_text:
+            warnings.append(f"{label}: compile command doesn't reference /home/student/workspace/, may use relative path")
+        if '-o ' in script_text and '/tmp/' not in script_text:
+            warnings.append(f"{label}: compile output may not go to /tmp/")
 
 
-def validate_tutorial(data, filepath):
+def validate(tutorial_dir):
     errors = []
     warnings = []
+    tutorial_dir = Path(tutorial_dir).resolve()
 
-    print(f"\nValidating: {filepath}")
-    print("-" * 60)
+    if not tutorial_dir.is_dir():
+        return [f"not a directory: {tutorial_dir}"]
 
-    # Top-level required fields
-    if not check_required(data, ["id", "title", "description", "language", "steps"], "$", errors):
-        return errors, warnings
+    # 1. multilab.json
+    manifest_path = tutorial_dir / 'multilab.json'
+    json_path = manifest_path
+    manifest_name = json_path.name
+    if not json_path.exists():
+        errors.append("missing multilab.json")
+        return errors
 
-    # id matches directory name
-    tutorial_dir = Path(filepath).parent.name
-    if data.get("id") != tutorial_dir:
-        warn(f"$.id ({data.get('id')}) does not match directory name ({tutorial_dir})", warnings)
+    try:
+        cfg = json.loads(json_path.read_text(encoding='utf-8'))
+    except json.JSONDecodeError as e:
+        errors.append(f"{manifest_name}: invalid JSON: {e}")
+        return errors
 
-    # language is valid
-    lang = data.get("language")
-    if lang not in VALID_LANGUAGES:
-        fail(f"$.language '{lang}' is not valid. Must be one of: {sorted(VALID_LANGUAGES)}", errors)
+    # required top-level fields
+    required_fields = ('schema_version', 'id', 'version', 'title', 'description', 'language', 'steps')
+    for field in required_fields:
+        if field not in cfg:
+            errors.append(f"{manifest_name}: missing required field '{field}'")
 
-    # steps is non-empty array
-    steps = data.get("steps", [])
-    if not isinstance(steps, list) or len(steps) == 0:
-        fail("$.steps must be a non-empty array", errors)
-        return errors, warnings
+    if cfg.get('language') and cfg['language'] not in VALID_LANGUAGES:
+        errors.append(f"{manifest_name}: invalid language '{cfg['language']}', must be one of {sorted(VALID_LANGUAGES)}")
 
-    print(f"  OK: {len(steps)} step(s) found")
+    if 'runtime_requirements' not in cfg:
+        warnings.append(f"{manifest_name}: missing runtime_requirements")
 
-    # Validate each step
+    # id should match directory name
+    if cfg.get('id') and cfg['id'] != tutorial_dir.name:
+        warnings.append(f"{manifest_name}: id '{cfg['id']}' does not match directory name '{tutorial_dir.name}'")
+
+    steps = cfg.get('steps', [])
+    if not steps:
+        errors.append(f"{manifest_name}: steps array is empty")
+        return errors
+
+    # 2. each step
+    steps_dir = tutorial_dir / 'steps'
+    if not steps_dir.is_dir():
+        errors.append("missing steps/ directory")
+        return errors
+
     for i, step in enumerate(steps):
-        step_path = f"$.steps[{i}]"
-        print(f"\n  Step {i}: {step.get('title', '(no title)')}")
+        step_id = step.get('id', f'<step {i}>')
+        step_title = step.get('title', '')
+        step_dir = steps_dir / step_id
 
-        if not check_required(step, ["title", "instructions"], step_path, errors):
+        # step id naming
+        if not STEP_ID_RE.match(str(step_id)):
+            warnings.append(f"step '{step_id}': id should be semantic slug like '01-first-program', not bare number")
+
+        # step directory exists
+        if not step_dir.is_dir():
+            errors.append(f"step '{step_id}': missing directory {step_dir.relative_to(tutorial_dir)}")
             continue
 
-        # files (optional but recommended)
-        files = step.get("files", [])
-        if not files:
-            warn(f"{step_path}.files is empty - editor will start with no code", warnings)
+        # instructions.md
+        instructions_path = step_dir / 'instructions.md'
+        if not instructions_path.exists():
+            errors.append(f"step '{step_id}': missing instructions.md")
+        else:
+            text = instructions_path.read_text(encoding='utf-8')
+            check_no_emoji(text, f"step '{step_id}' instructions.md", errors)
+            if len(text) > 3000:
+                warnings.append(f"step '{step_id}': instructions.md is long ({len(text)} chars), consider splitting")
 
-        # Check file objects
-        file_names = []
-        for j, f in enumerate(files):
-            file_path = f"{step_path}.files[{j}]"
-            if not check_required(f, ["name", "content"], file_path, errors):
-                continue
-            file_names.append(f["name"])
+        # files/ directory
+        files_dir = step_dir / 'files'
+        if not files_dir.is_dir():
+            errors.append(f"step '{step_id}': missing files/ directory")
+        elif not any(files_dir.iterdir()):
+            warnings.append(f"step '{step_id}': files/ directory is empty")
 
-            # Check emoji in content
-            matches = EMOJI_PATTERN.findall(f.get("content", ""))
-            if matches:
-                warn(f"{file_path}.content contains emoji/symbols: {''.join(matches)}", warnings)
+        # step title
+        if not step_title:
+            warnings.append(f"step '{step_id}': missing title")
 
-        # Check run_cmd references
-        run_cmd = step.get("run_cmd", "")
-        if run_cmd:
-            # Extract referenced workspace files
-            referenced = set(re.findall(r"/home/student/workspace/(\S+)", run_cmd))
-            for ref in referenced:
-                # Strip wildcards
-                clean_ref = ref.replace("*", "").rstrip("/")
-                if clean_ref and clean_ref not in file_names and "*" not in ref:
-                    # Check if it's a partial match (e.g., *.c)
-                    if not any(fn.endswith(clean_ref) or clean_ref.endswith(fn) for fn in file_names):
-                        warn(
-                            f"{step_path}.run_cmd references '{ref}' "
-                            f"but files are: {file_names}",
-                            warnings,
-                        )
+        # chain id naming
+        chain = step.get('chain')
+        if chain is not None and not CHAIN_ID_RE.match(str(chain)):
+            warnings.append(f"step '{step_id}': chain should be lowercase slug like 'mini-shell'")
 
-            # Check output binary location
-            if "-o " in run_cmd:
-                output_match = re.search(r"-o\s+(\S+)", run_cmd)
-                if output_match:
-                    output_path = output_match.group(1)
-                    if not output_path.startswith("/tmp/"):
-                        warn(
-                            f"{step_path}.run_cmd outputs to '{output_path}' - "
-                            f"prefer /tmp/ to avoid polluting workspace",
-                            warnings,
-                        )
+        inherit_mode = step.get('inherit_mode')
+        if inherit_mode not in VALID_INHERIT_MODES:
+            errors.append(f"step '{step_id}': inherit_mode must be one of {sorted(VALID_INHERIT_MODES)}")
 
-        # Check emoji in instructions
-        matches = EMOJI_PATTERN.findall(step.get("instructions", ""))
-        if matches:
-            warn(f"{step_path}.instructions contains emoji/symbols: {''.join(matches)}", warnings)
+        commands = step.get('commands', [])
+        if not isinstance(commands, list) or not commands:
+            warnings.append(f"step '{step_id}': no commands declared")
+        for j, command in enumerate(commands):
+            label = f"step '{step_id}' command {j}"
+            command_type = command.get('type')
+            if command_type not in VALID_COMMAND_TYPES:
+                errors.append(f"{label}: type must be one of {sorted(VALID_COMMAND_TYPES)}")
+            script = command.get('script')
+            script_path = resolve_package_path(tutorial_dir, script, label, errors)
+            validate_script(script_path, label, cfg.get('language'), errors, warnings, command_type)
 
-        # Check instructions length (rough word count)
-        instructions = step.get("instructions", "")
-        word_count = len(instructions.split())
-        if word_count > 400:
-            warn(f"{step_path}.instructions is {word_count} words - consider splitting into more steps", warnings)
-
-        # Check for TODO in code
-        has_todo = any("TODO" in f.get("content", "") for f in files)
-        if not has_todo and files:
-            warn(f"{step_path}: no TODO markers found in code - consider adding interactive prompts", warnings)
+        # check for old-style inline fields (migration check)
+        for old_field in ('instructions', 'files', 'run_cmd'):
+            if old_field in step:
+                errors.append(f"step '{step_id}': found inline '{old_field}' in {manifest_name} — content should be in real files under steps/{step_id}/")
 
     return errors, warnings
 
 
 def main():
     if len(sys.argv) != 2:
-        print("Usage: python validate_tutorial.py <path-to-tutorial.json>")
+        print("Usage: python validate_tutorial.py <path-to-tutorial-dir>")
         sys.exit(2)
 
-    filepath = sys.argv[1]
-    if not Path(filepath).exists():
-        print(f"Error: file not found: {filepath}")
-        sys.exit(2)
-
-    # Parse JSON
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except json.JSONDecodeError as e:
-        print(f"\nJSON SYNTAX ERROR:")
-        print(f"  {e}")
-        print(f"\nCommon fixes:")
-        print(f"  - Unescaped quotes: use \\\" inside strings")
-        print(f"  - Unescaped backslash: use \\\\ for literal backslash")
-        print(f"  - Unescaped newline: use \\n inside strings")
-        print(f"  - Trailing comma: remove comma before closing }} or ]")
-        sys.exit(1)
-
-    errors, warnings = validate_tutorial(data, filepath)
-
-    print("\n" + "=" * 60)
-    if errors:
-        print(f"RESULT: {len(errors)} error(s), {len(warnings)} warning(s)")
-        print("\nFix the errors above before delivering the tutorial.")
-        sys.exit(1)
-    elif warnings:
-        print(f"RESULT: 0 errors, {len(warnings)} warning(s)")
-        print("\nTutorial is valid. Review the warnings above (optional fixes).")
-        sys.exit(0)
+    result = validate(sys.argv[1])
+    if isinstance(result, tuple):
+        errors, warnings = result
     else:
-        print("RESULT: 0 errors, 0 warnings")
-        print("\nTutorial is valid and ready to use.")
-        sys.exit(0)
+        errors, warnings = result, []
+
+    if warnings:
+        print("=== Warnings ===")
+        for w in warnings:
+            print(f"  WARN: {w}")
+        print()
+
+    if errors:
+        print("=== Errors ===")
+        for e in errors:
+            print(f"  FAIL: {e}")
+        print(f"\n{len(errors)} error(s) found.")
+        sys.exit(1)
+
+    print("OK: tutorial structure is valid.")
+    if warnings:
+        print(f"({len(warnings)} warning(s))")
+    sys.exit(0)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

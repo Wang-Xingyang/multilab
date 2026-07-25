@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "id": "tutorial-template",
+  "version": "1.0.0",
+  "title": "Tutorial Template",
+  "description": "A starter MultiLab tutorial template.",
+  "language": "c",
+  "runtime_requirements": {
+    "platform": "linux",
+    "commands": {
+      "gcc": ">=13",
+      "bash": ">=5"
+    },
+    "capabilities": ["tty", "compile"]
+  },
+  "recommended_kernel": "gcc-ubuntu24-docker",
+  "security": {
+    "sandbox_required": true,
+    "network_required": false,
+    "trust": "local-authored"
+  },
+  "steps": [
+    {
+      "id": "01-example",
+      "title": "Example Step",
+      "inherit_mode": "template",
+      "entry_file": "main.c",
+      "commands": [
+        {
+          "id": "run",
+          "type": "run",
+          "label": "Run",
+          "script": "steps/01-example/commands/run.sh",
+          "terminal": "interactive",
+          "timeout_sec": 10
+        },
+        {
+          "id": "test",
+          "type": "test",
+          "label": "Check",
+          "script": "steps/01-example/commands/test.sh",
+          "terminal": "captured",
+          "timeout_sec": 10
+        }
+      ]
+    }
+  ]
+}

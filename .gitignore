@@ -30,6 +30,7 @@ docker/data/
 # Workspace (用户工作区,不入 git)
 workspace/
 sessions/
+.multilab-state/
 
 # Tutorial 临时文件
 *.tmp

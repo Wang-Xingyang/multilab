@@ -1,6 +1,18 @@
 # MultiLab OS 课镜像 — 系统编程环境
 # 用途: 学员在此容器内编译运行 C 代码、调试 gdb、练习 shell
+#
+# 构建:
+#   默认 (官方源):   docker build -t multilab/os:latest -f docker/os.Dockerfile docker/
+#   国内加速 (清华):  docker build --build-arg APT_MIRROR=mirrors.tuna.tsinghua.edu.cn -t multilab/os:latest -f docker/os.Dockerfile docker/
+#   国内加速 (阿里):  docker build --build-arg APT_MIRROR=mirrors.aliyun.com -t multilab/os:latest -f docker/os.Dockerfile docker/
+
 FROM ubuntu:24.04
+
+# 默认用官方源，通过 --build-arg APT_MIRROR=... 切换国内镜像
+ARG APT_MIRROR=""
+RUN if [ -n "$APT_MIRROR" ]; then \
+      sed -i "s|http://archive.ubuntu.com|http://${APT_MIRROR}|g; s|http://security.ubuntu.com|http://${APT_MIRROR}|g" /etc/apt/sources.list.d/ubuntu.sources; \
+    fi
 
 # 避免安装时交互卡住
 ENV DEBIAN_FRONTEND=noninteractive

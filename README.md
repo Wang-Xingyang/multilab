@@ -1,114 +1,155 @@
 # MultiLab
 
-> 本地交互式学习环境 —— 左侧 Markdown 教程，右侧 Monaco 编辑器 + 真终端，代码通过 Docker 容器执行。
+MultiLab is a local-first interactive tutorial player for programming labs.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node](https://img.shields.io/badge/node-%3E%3D20-green)](https://nodejs.org/)
-[![Docker](https://img.shields.io/badge/docker-%3E%3D20-blue)](https://www.docker.com/)
+It runs `.mlab`-style tutorial directories from a local tutorial repository. A tutorial declares its manifest in `multilab.json`, provides real Markdown/code/script files, and runs commands inside a kernel/runtime. The current official runtime is a Docker container for OS/C labs.
 
-灵感来自 UCLA 的 [SEBook](https://tobiasduerschmid.github.io/SEBook/)，但用 **Docker 容器** 替代 WebAssembly 后端 —— 本地化部署、零云端成本、原生性能、完整工具链。
+## Current Status
 
-## 为什么用 MultiLab
+This repository is an early prototype of the MultiLab host:
 
-| | SEBook (Wasm) | MultiLab (Docker) |
-|---|---|---|
-| 执行后端 | v86 / Pyodide / WebContainer | 真正的 Linux 容器 |
-| 性能 | 模拟器开销 | 原生性能 |
-| 工具链 | 受限于 Wasm 移植 | 任意 apt 可装 |
-| 交互式调试 | 受限 | 完整 gdb / strace / ltrace |
-| 离线 | ✅ | ✅ |
-| 后端成本 | 零 | 零（本地 Docker） |
-| 部署难度 | 静态站 | `docker-compose up` |
+- frontend: single-page `public/index.html` with Monaco Editor and xterm.js;
+- backend: `server/index.js` with Express, WebSocket, and dockerode;
+- runtime: `docker/os.Dockerfile` with Ubuntu, gcc, gdb, make, valgrind, strace;
+- package format: tutorial directories with `multilab.json`;
+- command model: manifest-declared `commands[]` with script files;
+- step model: explicit `inherit_mode`;
+- state: local step saves under `.multilab-state`.
 
-## 当前支持
+The long-term product direction is documented in:
 
-| 语言场景 | 镜像 | 状态 |
-|---|---|---|
-| **C / Shell (OS 课)** | `multilab/os:latest` | 已支持：gcc / gdb / make / valgrind / strace / manpages |
-| Node.js | `multilab/node:latest` | 计划中 |
-| Python | `multilab/python:latest` | 计划中 |
-| Rust / Go | — | 计划中 |
+```text
+../MULTILAB_PRODUCT_ARCHITECTURE_SPEC.md
+```
 
-## 快速开始
+## Repository Layout
 
-### 前置要求
+The outer workspace contains three separate git repositories:
 
-- **Docker 20+**（WSL 用户请开启 WSL Integration）
-- **Node.js 20+**（推荐用 [nvm](https://github.com/nvm-sh/nvm) 管理）
+```text
+multilab-project/
+  multilab/      # this framework repo
+  tutorials/     # tutorial content repo
+  .ai/           # shared agent memory repo
+```
 
-### 三步启动
+Inside this repo:
+
+```text
+multilab/
+  docker/
+    os.Dockerfile
+  public/
+    index.html
+  server/
+    index.js
+    package.json
+    .env.example
+  docs/
+    architecture.md
+    tutorial-authoring.md
+    tutorial-skill/
+```
+
+Tutorial content lives outside this repo by default:
+
+```text
+../tutorials/
+  hello-c/
+    multilab.json
+    steps/
+```
+
+## Quick Start
+
+Prerequisites:
+
+- Docker Desktop with WSL integration enabled;
+- Node.js 20+;
+- npm.
+
+Build the OS runtime image:
 
 ```bash
-# 1. 克隆
-git clone <your-fork-url> ~/multilab-project/multilab
-cd ~/multilab-project/multilab
-
-# 2. 构建执行镜像 + 安装后端依赖
 docker build -t multilab/os:latest -f docker/os.Dockerfile docker/
-cd server && npm install && cd ..
-
-# 3. 启动
-cd server && npm start
 ```
 
-浏览器访问 **http://localhost:3000**
+Install backend dependencies:
 
-> **不想装 Node？** 直接 `docker-compose up --build`，连后端都容器化。详见 [部署指南](docs/deployment.md)。
-
-## 工作流
-
-```
-┌────────────────────┬─────────────────────────┐
-│  教程 (Markdown)    │  Monaco Editor          │
-│                    │  (VS Code 同款)          │
-│  - 步骤导航         ├─────────────────────────┤
-│  - 代码示例         │  Terminal (xterm.js)     │
-│  - 任务说明         │  真 TTY → Docker exec    │
-│                    │  支持 gdb / 交互式 REPL  │
-└────────────────────┴─────────────────────────┘
+```bash
+cd server
+npm install
+cp .env.example .env
 ```
 
-1. 左侧渲染 Markdown 教程，提供步骤导航
-2. 右侧上方是 Monaco 编辑器，写代码
-3. 右侧下方是真终端，支持交互式 gdb / REPL
-4. 点 **▶ 运行** 或 `Ctrl+Enter`，代码写入容器、编译执行、stdout 实时回显
+The default `.env` points `TUTORIALS_DIR` at `../../tutorials`.
 
-## 目录速览
+Start the server:
 
-```
-multilab/
-├── docker/
-│   └── os.Dockerfile          # OS 课执行镜像
-├── server/
-│   ├── package.json
-│   ├── index.js               # 后端核心 (~230 行)
-│   └── Dockerfile             # 后端容器镜像（部署用）
-├── public/
-│   └── index.html             # 前端单页 (CDN 引 Monaco + xterm + marked)
-├── tutorials/
-│   └── hello-c/
-│       └── tutorial.json      # 教程定义
-├── docs/                      # 详细文档
-├── docker-compose.yml         # 一键部署
-└── README.md
+```bash
+npm start
 ```
 
-## 文档
+Open:
 
-- [架构设计](docs/architecture.md) —— 技术选型、数据流、与 SEBook 对比
-- [开发指南](docs/development.md) —— 开发环境、Git 工作流、贡献流程
-- [教程编写指南](docs/tutorial-authoring.md) —— 如何添加新教程和新语言
-- [教程生成器 Skill](docs/tutorial-skill/README.md) —— AI agent 自动生成教程的工具（含验证脚本和模板）
-- [故障排除](docs/troubleshooting.md) —— 常见问题与已知坑
-- [部署指南](docs/deployment.md) —— Docker Compose 部署、生产环境配置
+```text
+http://localhost:3000
+```
 
-## 开发约定
+## Tutorial Format
 
-- 主分支 `main` 永远可运行
-- 改动走 **feature branch + PR + squash merge**
-- commit message 用 [Conventional Commits](https://www.conventionalcommits.org/)：`feat:` / `fix:` / `docs:` / `chore:` / `refactor:`
-- 详见 [开发指南](docs/development.md)
+Each tutorial is a directory with a required `multilab.json` manifest:
 
-## License
+```text
+tutorials/<id>/
+  multilab.json
+  steps/
+    01-example/
+      instructions.md
+      files/
+        main.c
+      commands/
+        run.sh
+        test.sh
+```
 
-MIT
+The manifest declares metadata, runtime requirements, panels, steps, `inherit_mode`, and commands. Script content is stored in real files and read only when executed.
+
+See `docs/tutorial-authoring.md`.
+
+## Checks
+
+Server syntax:
+
+```bash
+cd multilab
+node --check server/index.js
+```
+
+Tutorial validation:
+
+```bash
+cd multilab
+python3 docs/tutorial-skill/scripts/validate_tutorial.py ../tutorials/hello-c
+```
+
+Frontend inline script syntax:
+
+```bash
+cd multilab
+node -e "const fs=require('fs'); const vm=require('vm'); const html=fs.readFileSync('public/index.html','utf8'); const scripts=[...html.matchAll(/<script>([\\s\\S]*?)<\\/script>/g)].map(m=>m[1]).join('\\n'); new vm.Script(scripts); console.log('inline script syntax OK');"
+```
+
+## Documentation
+
+- `docs/architecture.md`: current host/runtime/package architecture.
+- `docs/tutorial-authoring.md`: how to write `multilab.json` tutorials.
+- `docs/tutorial-skill/`: guidance and assets for AI-generated tutorials.
+- `../MULTILAB_PRODUCT_ARCHITECTURE_SPEC.md`: product-level target architecture.
+
+## Development Notes
+
+- Do not add new `tutorial.json` support.
+- Do not reintroduce `run_cmd`, `has_run`, `has_test`, `/api/test`, or WebSocket `type: "run"`.
+- New execution should go through manifest `commands[]`.
+- Docker is the first official runtime provider, not the permanent architecture boundary.
