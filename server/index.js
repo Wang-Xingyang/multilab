@@ -11,6 +11,7 @@ import { WebSocketServer } from 'ws';
 import http from 'http';
 import path from 'path';
 import fs from 'fs/promises';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { DockerRuntimeProvider } from './runtime/DockerRuntimeProvider.js';
 
@@ -52,13 +53,14 @@ app.get('/api/tutorials', async (req, res) => {
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       try {
-        const { cfg, packageFormat, sourceFile } = await loadTutorialConfig(entry.name);
+        const { cfg, packageFormat, sourceFile, packageDigest } = await loadTutorialConfig(entry.name);
         tutorials.push({
           id: entry.name,
           title: cfg.title,
           description: cfg.description,
           language: cfg.language,
           version: cfg.version || '0.0.0',
+          package_digest: packageDigest,
           schema_version: cfg.schema_version || 0,
           package_format: packageFormat,
           source_file: sourceFile,
@@ -151,13 +153,60 @@ async function readJsonFile(filePath) {
   return JSON.parse(await fs.readFile(filePath, 'utf8'));
 }
 
+async function listPackageFiles(rootDir, currentDir = rootDir) {
+  const entries = await fs.readdir(currentDir, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    const absPath = path.join(currentDir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await listPackageFiles(rootDir, absPath));
+    } else if (entry.isFile()) {
+      files.push(path.relative(rootDir, absPath).split(path.sep).join('/'));
+    }
+  }
+  return files;
+}
+
+async function computePackageDigest(tutorialDir) {
+  const hash = crypto.createHash('sha256');
+  const files = await listPackageFiles(tutorialDir);
+  for (const relPath of files) {
+    const content = await fs.readFile(path.join(tutorialDir, relPath));
+    hash.update('file\0');
+    hash.update(relPath);
+    hash.update('\0');
+    hash.update(String(content.length));
+    hash.update('\0');
+    hash.update(content);
+    hash.update('\0');
+  }
+  return `sha256:${hash.digest('hex')}`;
+}
+
+function digestPathSegment(digest) {
+  const segment = String(digest || '').replace(/^sha256:/, 'sha256-');
+  if (!/^[a-zA-Z0-9_.-]+$/.test(segment)) {
+    throw Object.assign(new Error('Invalid package digest'), { statusCode: 400 });
+  }
+  return segment;
+}
+
+function validateStorageSegment(value, fieldName) {
+  const segment = String(value || '');
+  if (!segment || segment.includes('..') || !/^[a-zA-Z0-9_.+-]+$/.test(segment)) {
+    throw Object.assign(new Error(`Invalid ${fieldName}`), { statusCode: 400 });
+  }
+  return segment;
+}
+
 async function loadTutorialConfig(tutorialId) {
   validateSafePath(tutorialId);
   const tutorialDir = path.join(TUTORIALS_DIR, tutorialId);
   const manifestPath = path.join(tutorialDir, MANIFEST_FILE);
   const cfg = await readJsonFile(manifestPath);
   cfg.id = cfg.id || tutorialId;
-  return { cfg, tutorialDir, packageFormat: 'multilab', sourceFile: MANIFEST_FILE };
+  const packageDigest = await computePackageDigest(tutorialDir);
+  return { cfg, tutorialDir, packageFormat: 'multilab', sourceFile: MANIFEST_FILE, packageDigest };
 }
 
 function stepInheritMode(step) {
@@ -204,8 +253,15 @@ async function ensureWorkspaceDir() {
   await runtimeSession.ensureWorkspace();
 }
 
-function saveDir(tutorialId, stepId) {
-  return path.join(RUNTIME_STATE_DIR, 'saves', validateSafePath(tutorialId), validateSafePath(stepId));
+function packageSaveRoot(cfg) {
+  const packageId = validateSafePath(cfg.id);
+  const version = validateStorageSegment(cfg.version || '0.0.0', 'package version');
+  const digest = digestPathSegment(cfg.package_digest);
+  return path.join(RUNTIME_STATE_DIR, 'saves', packageId, version, digest);
+}
+
+function saveDir(cfg, stepId) {
+  return path.join(packageSaveRoot(cfg), 'steps', validateSafePath(stepId), 'files');
 }
 
 function stepChain(step) {
@@ -294,7 +350,7 @@ async function loadStepState(tutorialId, stepId) {
   await ensureRuntimeDirs();
   const cfg = await loadTutorial(tutorialId);
   const step = findStep(cfg, stepId);
-  const ownSaveDir = saveDir(tutorialId, step.id);
+  const ownSaveDir = saveDir(cfg, step.id);
   const mode = stepInheritMode(step);
   let sourceStep = step.id;
   let hasOwnSave = await dirExists(ownSaveDir);
@@ -313,7 +369,7 @@ async function loadStepState(tutorialId, stepId) {
     let sourceDir = null;
     for (let i = idx - 1; i >= 0; i--) {
       if (stepChain(steps[i]) !== chain) continue;
-      const prevSaveDir = saveDir(tutorialId, steps[i].id);
+      const prevSaveDir = saveDir(cfg, steps[i].id);
       if (await dirExists(prevSaveDir)) {
         sourceDir = prevSaveDir;
         sourceStep = steps[i].id;
@@ -322,7 +378,7 @@ async function loadStepState(tutorialId, stepId) {
     }
     if (!sourceDir) {
       const first = findChainFirstStep(cfg, chain) || step;
-      sourceDir = saveDir(tutorialId, first.id);
+      sourceDir = saveDir(cfg, first.id);
       sourceStep = first.id;
       if (!(await dirExists(sourceDir))) {
         await writeStepTemplateToDir(first, sourceDir);
@@ -360,7 +416,7 @@ async function saveStepState(tutorialId, stepId, files) {
   await ensureRuntimeDirs();
   const cfg = await loadTutorial(tutorialId);
   const step = findStep(cfg, stepId);
-  const dest = saveDir(tutorialId, step.id);
+  const dest = saveDir(cfg, step.id);
   const providedFiles = Array.isArray(files) ? files : null;
   const normalizedFiles = (providedFiles || []).map(f => ({
     name: validateFileName(f.name || 'untitled'),
@@ -378,7 +434,7 @@ async function resetStepState(tutorialId, stepId) {
   await ensureRuntimeDirs();
   const cfg = await loadTutorial(tutorialId);
   const step = findStep(cfg, stepId);
-  const dest = saveDir(tutorialId, step.id);
+  const dest = saveDir(cfg, step.id);
   await writeStepTemplateToDir(step, dest);
   const files = await readHostFiles(dest);
   await writeFilesToWorkspace(files);
@@ -391,9 +447,10 @@ async function resetStepState(tutorialId, stepId) {
 }
 
 async function loadTutorial(tutorialId) {
-  const { cfg, tutorialDir, packageFormat, sourceFile } = await loadTutorialConfig(tutorialId);
+  const { cfg, tutorialDir, packageFormat, sourceFile, packageDigest } = await loadTutorialConfig(tutorialId);
   cfg.package_format = packageFormat;
   cfg.source_file = sourceFile;
+  cfg.package_digest = packageDigest;
   cfg.schema_version = cfg.schema_version || 0;
   cfg.version = cfg.version || '0.0.0';
 

@@ -178,13 +178,15 @@ Current implementation intentionally does not overwrite learner files during `ov
 
 ## Save Storage
 
-Current prototype saves are still stored under:
+Current prototype saves are stored under `.multilab-state`, but the identity now includes package id, version, and digest:
 
 ```text
-multilab/.multilab-state/saves/<tutorial>/<step>/
+multilab/.multilab-state/saves/<id>/<version>/<digest>/steps/<step>/files/
 ```
 
-Target product storage is documented in the root spec:
+The digest is a deterministic `sha256:<hex>` over the tutorial package directory contents. The filesystem path uses a safe `sha256-<hex>` segment.
+
+The final product storage root is documented in the root spec:
 
 ```text
 ~/.multilab/saves/<id>/<version>/<digest>/
@@ -211,7 +213,6 @@ Target security model:
 ## Known Limitations
 
 - Docker is still the only implemented provider.
-- Save paths are not yet version/digest aware.
 - `.mlab` pack/unpack is not implemented.
 - Panel declarations are present in manifests but not fully rendered dynamically.
 - The Docker container is single-session and not suitable for multi-user deployment.
