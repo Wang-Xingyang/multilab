@@ -304,7 +304,7 @@ GET /api/kernels
 GET /api/kernels/resolve?tutorial=<id>
 ```
 
-The resolver currently checks required platform, capabilities, and command names, and prefers `recommended_kernel`. It does not yet enforce runtime selection, trust policy, network policy, or version constraints.
+The resolver currently checks required platform, capabilities, command names, and simple command version constraints such as `>=13`, then prefers `recommended_kernel`. It returns `version_mismatches` for incompatible command versions. It does not yet enforce runtime selection or support complex semver ranges.
 
 ## Known Limitations
 
