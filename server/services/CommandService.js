@@ -1,9 +1,10 @@
 import { validateSafePath } from './PackageService.js';
 
 export class CommandService {
-  constructor({ packageService, runtimeSession }) {
+  constructor({ packageService, runtimeSession, securityPolicyService = null }) {
     this.packageService = packageService;
     this.runtimeSession = runtimeSession;
+    this.securityPolicyService = securityPolicyService;
   }
 
   async runCapturedCommand({ tutorial, step, command }) {
@@ -11,6 +12,7 @@ export class CommandService {
     validateSafePath(step);
     validateSafePath(command);
 
+    await this.authorizeCommand({ tutorial });
     const commandSpec = await this.packageService.getStepCommandScript(tutorial, step, command);
     if (commandSpec.command.terminal === 'interactive') {
       throw Object.assign(
@@ -35,6 +37,7 @@ export class CommandService {
     validateSafePath(step);
     validateSafePath(command);
 
+    await this.authorizeCommand({ tutorial });
     const commandSpec = await this.packageService.getStepCommandScript(tutorial, step, command);
     if (commandSpec.command.terminal === 'captured') {
       throw Object.assign(
@@ -47,6 +50,11 @@ export class CommandService {
     await this.runtimeSession.uploadScript(commandSpec.script, remoteScript);
     terminal.runScript(remoteScript);
     return { command };
+  }
+
+  async authorizeCommand({ tutorial }) {
+    if (!this.securityPolicyService) return null;
+    return this.securityPolicyService.authorizeCommand({ tutorial });
   }
 }
 

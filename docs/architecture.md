@@ -40,6 +40,7 @@ Node host
   PackageLibrary
   SaveService
   CommandService
+  SecurityPolicyService
   TrustStore
   KernelRegistry
   RuntimeProvider abstraction
@@ -155,7 +156,7 @@ Current execution modes:
 - `interactive`: executed through the WebSocket terminal.
 - `captured`: executed through `POST /api/commands/run`.
 
-Command execution is coordinated by `server/services/CommandService.js`. It asks `PackageService` to resolve the declared script, uploads that script through `RuntimeSession`, and dispatches to either captured execution or an attached interactive terminal.
+Command execution is coordinated by `server/services/CommandService.js`. Before a command runs, it asks `SecurityPolicyService` to check package trust, the manifest security policy, and the kernel resolver result. It then asks `PackageService` to resolve the declared script, uploads that script through `RuntimeSession`, and dispatches to either captured execution or an attached interactive terminal.
 
 ### Interactive Command Flow
 
@@ -254,6 +255,16 @@ Current practical protections:
 - tutorial scripts are loaded from package paths after path validation;
 - test/check commands run inside the Docker runtime, not on the host.
 - package trust defaults to `untrusted` and is stored by package digest under `.multilab-state/trust.json`.
+
+Current command execution policy:
+
+- command execution requires a compatible resolved kernel;
+- `untrusted` packages require a sandbox-capable kernel;
+- packages with `security.sandbox_required: true` require a sandbox-capable kernel even when user-trusted;
+- packages that do not require network access require a selected kernel whose `network_default` is `none`;
+- packages that require network access are rejected until a network-capable selected kernel/runtime path exists.
+
+This policy currently guards command execution, but it does not yet dynamically select a runtime provider or change Docker network settings.
 
 Target security model:
 

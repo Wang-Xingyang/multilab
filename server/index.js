@@ -22,6 +22,7 @@ import { TrustStore } from './services/TrustStore.js';
 import { createDefaultKernelRegistry } from './services/KernelRegistry.js';
 import { MlabArchiveService } from './services/MlabArchiveService.js';
 import { PackageLibrary } from './services/PackageLibrary.js';
+import { SecurityPolicyService } from './services/SecurityPolicyService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,11 +64,20 @@ const saveService = new SaveService({
   runtimeSession,
   packageService,
 });
-const commandService = new CommandService({ packageService, runtimeSession });
 const trustStore = new TrustStore({ runtimeStateDir: RUNTIME_STATE_DIR });
 const kernelRegistry = createDefaultKernelRegistry({
   image: EXEC_IMAGE,
   workspaceDir: WORKSPACE_DIR,
+});
+const securityPolicyService = new SecurityPolicyService({
+  packageService,
+  trustStore,
+  kernelRegistry,
+});
+const commandService = new CommandService({
+  packageService,
+  runtimeSession,
+  securityPolicyService,
 });
 
 // ---------- 1. Express ----------
