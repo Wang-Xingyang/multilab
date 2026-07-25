@@ -238,6 +238,14 @@ multilab/.multilab-state/saves/<id>/<version>/<digest>/steps/<step>/files/
 
 The digest is a deterministic `sha256:<hex>` over the tutorial package directory contents. The filesystem path uses a safe `sha256-<hex>` segment.
 
+`SaveService` also writes progress metadata at:
+
+```text
+multilab/.multilab-state/saves/<id>/<version>/<digest>/save.json
+```
+
+Current metadata tracks package identity, `current_step`, visited steps, test pass/fail state per step, and `updated_at`. Step load/save/reset records the current step as visited. Captured commands with `type: "test"` update `test_passed[step]`.
+
 The final product storage root is documented in the root spec:
 
 ```text

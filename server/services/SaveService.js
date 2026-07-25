@@ -69,6 +69,7 @@ export class SaveService {
     }
 
     await this.writeFilesToWorkspace(files);
+    const progress = await this.recordStepVisit(cfg, step.id);
     return {
       tutorial: tutorialId,
       step: step.id,
@@ -76,6 +77,7 @@ export class SaveService {
       hasOwnSave,
       inheritMode: mode,
       files,
+      progress,
     };
   }
 
@@ -94,7 +96,8 @@ export class SaveService {
     if (providedFiles) await this.writeFilesToWorkspace(normalizedFiles, { clear: false });
     const workspaceFiles = await this.loadWorkspaceFiles();
     await writeHostFiles(dest, workspaceFiles);
-    return { tutorial: tutorialId, step: step.id, hasOwnSave: true };
+    const progress = await this.recordStepVisit(cfg, step.id);
+    return { tutorial: tutorialId, step: step.id, hasOwnSave: true, progress };
   }
 
   async resetStepState(tutorialId, stepId) {
@@ -107,11 +110,13 @@ export class SaveService {
     await writeStepTemplateToDir(step, dest);
     const files = await readHostFiles(dest);
     await this.writeFilesToWorkspace(files);
+    const progress = await this.recordStepVisit(cfg, step.id);
     return {
       tutorial: tutorialId,
       step: step.id,
       hasOwnSave: true,
       files,
+      progress,
     };
   }
 
@@ -129,6 +134,72 @@ export class SaveService {
     const version = validateStorageSegment(cfg.version || '0.0.0', 'package version');
     const digest = digestPathSegment(cfg.package_digest);
     return path.join(this.runtimeStateDir, 'saves', packageId, version, digest);
+  }
+
+  async recordStepVisit(cfg, stepId) {
+    const metadata = await this.readSaveMetadata(cfg);
+    const visited = new Set(Array.isArray(metadata.visited) ? metadata.visited : []);
+    visited.add(validateSafePath(stepId));
+    return this.writeSaveMetadata(cfg, {
+      ...metadata,
+      current_step: stepId,
+      visited: Array.from(visited),
+    });
+  }
+
+  async recordTestResult(tutorialId, stepId, passed) {
+    validateSafePath(tutorialId);
+    validateSafePath(stepId);
+    const cfg = await this.packageService.loadTutorial(tutorialId);
+    const step = findStep(cfg, stepId);
+    const metadata = await this.recordStepVisit(cfg, step.id);
+    return this.writeSaveMetadata(cfg, {
+      ...metadata,
+      test_passed: {
+        ...(metadata.test_passed || {}),
+        [step.id]: Boolean(passed),
+      },
+    });
+  }
+
+  async readSaveMetadata(cfg) {
+    const metadataPath = this.saveMetadataPath(cfg);
+    try {
+      const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+      return {
+        ...defaultSaveMetadata(cfg),
+        ...metadata,
+        package: defaultSaveMetadata(cfg).package,
+        visited: Array.isArray(metadata.visited) ? metadata.visited : [],
+        test_passed: metadata.test_passed && typeof metadata.test_passed === 'object'
+          ? metadata.test_passed
+          : {},
+      };
+    } catch (e) {
+      if (e.code === 'ENOENT') return defaultSaveMetadata(cfg);
+      throw e;
+    }
+  }
+
+  async writeSaveMetadata(cfg, metadata) {
+    const root = this.packageSaveRoot(cfg);
+    await fs.mkdir(root, { recursive: true });
+    const next = {
+      ...defaultSaveMetadata(cfg),
+      ...metadata,
+      package: defaultSaveMetadata(cfg).package,
+      visited: Array.isArray(metadata.visited) ? metadata.visited : [],
+      test_passed: metadata.test_passed && typeof metadata.test_passed === 'object'
+        ? metadata.test_passed
+        : {},
+      updated_at: new Date().toISOString(),
+    };
+    await fs.writeFile(this.saveMetadataPath(cfg), JSON.stringify(next, null, 2) + '\n', 'utf8');
+    return next;
+  }
+
+  saveMetadataPath(cfg) {
+    return path.join(this.packageSaveRoot(cfg), 'save.json');
   }
 
   async loadWorkspaceFiles() {
@@ -220,5 +291,19 @@ async function writeHostFiles(dir, files) {
     const name = validateFileName(f.name || 'untitled');
     await fs.writeFile(path.join(dir, name), f.content || '', 'utf8');
   }
+}
+
+function defaultSaveMetadata(cfg) {
+  return {
+    package: {
+      id: cfg.id,
+      version: cfg.version || '0.0.0',
+      digest: cfg.package_digest,
+    },
+    current_step: null,
+    visited: [],
+    test_passed: {},
+    updated_at: null,
+  };
 }
 

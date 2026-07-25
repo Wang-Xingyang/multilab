@@ -78,6 +78,7 @@ const commandService = new CommandService({
   packageService,
   runtimeSession,
   securityPolicyService,
+  saveService,
 });
 
 // ---------- 1. Express ----------

@@ -1,10 +1,11 @@
 import { validateSafePath } from './PackageService.js';
 
 export class CommandService {
-  constructor({ packageService, runtimeSession, securityPolicyService = null }) {
+  constructor({ packageService, runtimeSession, securityPolicyService = null, saveService = null }) {
     this.packageService = packageService;
     this.runtimeSession = runtimeSession;
     this.securityPolicyService = securityPolicyService;
+    this.saveService = saveService;
   }
 
   async runCapturedCommand({ tutorial, step, command }) {
@@ -24,11 +25,16 @@ export class CommandService {
     const remoteScript = remoteCommandPath(step, command);
     await this.runtimeSession.uploadScript(commandSpec.script, remoteScript);
     const result = await this.runtimeSession.runCaptured(remoteScript);
+    const passed = result.exitCode === 0;
+    const progress = commandSpec.command.type === 'test' && this.saveService
+      ? await this.saveService.recordTestResult(tutorial, step, passed)
+      : null;
     return {
       command,
       exitCode: result.exitCode,
-      passed: result.exitCode === 0,
+      passed,
       output: (result.stdout + (result.stderr ? '\n' + result.stderr : '')).trim(),
+      ...(progress ? { progress } : {}),
     };
   }
 
