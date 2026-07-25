@@ -19,6 +19,7 @@ import {
 import { SaveService } from './services/SaveService.js';
 import { CommandService } from './services/CommandService.js';
 import { TrustStore } from './services/TrustStore.js';
+import { createDefaultKernelRegistry } from './services/KernelRegistry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,6 +52,10 @@ const saveService = new SaveService({
 });
 const commandService = new CommandService({ packageService, runtimeSession });
 const trustStore = new TrustStore({ runtimeStateDir: RUNTIME_STATE_DIR });
+const kernelRegistry = createDefaultKernelRegistry({
+  image: EXEC_IMAGE,
+  workspaceDir: WORKSPACE_DIR,
+});
 
 // ---------- 1. Express ----------
 const app = express();
@@ -84,6 +89,25 @@ app.post('/api/trust', async (req, res) => {
     const { package_digest: packageDigest, trust } = req.body;
     if (!packageDigest || !trust) return res.status(400).json({ error: 'package_digest and trust required' });
     res.json(await trustStore.setPackageTrust(packageDigest, trust));
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message });
+  }
+});
+
+app.get('/api/kernels', async (req, res) => {
+  try {
+    res.json({ kernels: kernelRegistry.listKernels() });
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message });
+  }
+});
+
+app.get('/api/kernels/resolve', async (req, res) => {
+  try {
+    const tutorialId = req.query.tutorial;
+    if (!tutorialId) return res.status(400).json({ error: 'tutorial required' });
+    const tutorial = await packageService.loadTutorial(tutorialId);
+    res.json(kernelRegistry.resolveForPackage(tutorial));
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message });
   }

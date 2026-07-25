@@ -40,6 +40,7 @@ Node host
   SaveService
   CommandService
   TrustStore
+  KernelRegistry
   RuntimeProvider abstraction
 
 Docker runtime
@@ -246,9 +247,32 @@ POST /api/trust { package_digest, trust }
 
 The user-settable trust values are currently `untrusted` and `user-trusted`.
 
+## Kernel Registry
+
+The first implementation registers the current Docker runtime as an explicit kernel:
+
+```text
+gcc-ubuntu24-docker
+  provider: docker
+  image: multilab/os:latest
+  platform: linux
+  capabilities: tty, compile, debug, signals, sandbox
+  network_default: none
+```
+
+Current kernel APIs:
+
+```text
+GET /api/kernels
+GET /api/kernels/resolve?tutorial=<id>
+```
+
+The resolver currently checks required platform, capabilities, and command names, and prefers `recommended_kernel`. It does not yet enforce runtime selection, trust policy, network policy, or version constraints.
+
 ## Known Limitations
 
 - Docker is still the only implemented provider.
 - `.mlab` pack/unpack CLI is implemented; app-level import/open is not implemented.
+- Kernel registry is static and only contains the default Docker kernel.
 - Panel declarations are present in manifests but not fully rendered dynamically.
 - The Docker container is single-session and not suitable for multi-user deployment.
