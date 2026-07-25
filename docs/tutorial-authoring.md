@@ -232,6 +232,14 @@ python3 docs/tutorial-skill/scripts/pack_mlab.py ../tutorials/hello-c -o /tmp/he
 
 The packer validates the tutorial first, writes a `.mlab` ZIP package, and prints the deterministic package digest used by save identity.
 
+To unpack a `.mlab` package back into a tutorial directory:
+
+```bash
+python3 docs/tutorial-skill/scripts/unpack_mlab.py /tmp/hello-c.mlab -o /tmp/hello-c-unpacked
+```
+
+The unpacker checks zip paths, extracts into a temporary directory, validates the extracted tutorial, and then moves it into place.
+
 ## Recommended AI Workflow
 
 1. Generate a tutorial directory.

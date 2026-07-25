@@ -92,6 +92,14 @@ python3 docs/tutorial-skill/scripts/pack_mlab.py <tutorial-dir> -o <package.mlab
 
 The packer runs the validator first, writes package files at the ZIP root, and prints the same deterministic `sha256:<hex>` package digest used by save identity. Importing or opening `.mlab` files directly is not implemented yet.
 
+Packages can also be safely unpacked into a tutorial directory with:
+
+```bash
+python3 docs/tutorial-skill/scripts/unpack_mlab.py <package.mlab> -o <tutorial-dir>
+```
+
+The unpacker rejects unsafe zip paths, extracts into a temporary directory, validates the extracted tutorial, and only then moves it into place.
+
 ## Command Model
 
 Commands are first-class manifest objects:
@@ -230,6 +238,6 @@ Target security model:
 ## Known Limitations
 
 - Docker is still the only implemented provider.
-- `.mlab` pack is implemented; import/open/unpack is not implemented.
+- `.mlab` pack/unpack CLI is implemented; app-level import/open is not implemented.
 - Panel declarations are present in manifests but not fully rendered dynamically.
 - The Docker container is single-session and not suitable for multi-user deployment.

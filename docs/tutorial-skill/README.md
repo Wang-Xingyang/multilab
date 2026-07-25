@@ -25,6 +25,7 @@ tutorial-skill/
   scripts/
     validate_tutorial.py
     pack_mlab.py
+    unpack_mlab.py
 ```
 
 ## Validate A Tutorial
@@ -42,6 +43,15 @@ python3 docs/tutorial-skill/scripts/pack_mlab.py ../tutorials/hello-c -o /tmp/he
 ```
 
 The packer validates the tutorial first, then writes a `.mlab` ZIP package with `multilab.json` at the root and prints the package digest.
+
+## Unpack A Tutorial
+
+```bash
+cd multilab
+python3 docs/tutorial-skill/scripts/unpack_mlab.py /tmp/hello-c.mlab -o /tmp/hello-c-unpacked
+```
+
+The unpacker safely extracts package files into a new directory and validates the extracted tutorial before moving it into place.
 
 ## Use The Template
 
