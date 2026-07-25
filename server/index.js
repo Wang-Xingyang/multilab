@@ -49,7 +49,15 @@ const runtimeProvider = new DockerRuntimeProvider({
   workspaceDir: WORKSPACE_DIR,
 });
 const runtimeSession = runtimeProvider.session;
-const packageService = new PackageService({ tutorialsDir: TUTORIALS_DIR });
+const archiveService = new MlabArchiveService();
+const packageLibrary = new PackageLibrary({
+  libraryDir: PACKAGE_LIBRARY_DIR,
+  archiveService,
+});
+const packageService = new PackageService({
+  tutorialsDir: TUTORIALS_DIR,
+  packageLibrary,
+});
 const saveService = new SaveService({
   runtimeStateDir: RUNTIME_STATE_DIR,
   runtimeSession,
@@ -60,11 +68,6 @@ const trustStore = new TrustStore({ runtimeStateDir: RUNTIME_STATE_DIR });
 const kernelRegistry = createDefaultKernelRegistry({
   image: EXEC_IMAGE,
   workspaceDir: WORKSPACE_DIR,
-});
-const archiveService = new MlabArchiveService();
-const packageLibrary = new PackageLibrary({
-  libraryDir: PACKAGE_LIBRARY_DIR,
-  archiveService,
 });
 
 // ---------- 1. Express ----------

@@ -232,6 +232,8 @@
 <header>
   <div class="brand">Multi<span class="dot">·</span>Lab</div>
   <select id="tutorial-select"><option value="">加载中...</option></select>
+  <button id="import-package-btn" title="导入本机 .mlab 文件">导入 .mlab</button>
+  <button id="trust-btn" title="当前 package trust 状态" disabled>未加载</button>
   <div class="spacer"></div>
   <button id="theme-btn" title="切换主题">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
@@ -360,6 +362,38 @@ function status(msg) {
   const el = document.getElementById('status-bar');
   el.textContent = msg; el.className = 'status-bar show';
   setTimeout(() => el.className = 'status-bar', 1500);
+}
+
+function renderTrustButton() {
+  const btn = document.getElementById('trust-btn');
+  if (!currentTutorial?.package_digest) {
+    btn.textContent = '未加载';
+    btn.title = '当前 package trust 状态';
+    btn.disabled = true;
+    return;
+  }
+  const trust = currentTutorial.trust || 'untrusted';
+  const isTrusted = trust === 'user-trusted';
+  btn.textContent = isTrusted ? '已信任' : '未信任';
+  btn.title = `${currentTutorial.trust_default ? '默认' : '用户设置'} trust: ${trust}`;
+  btn.disabled = false;
+}
+
+async function toggleCurrentPackageTrust() {
+  if (!currentTutorial?.package_digest) return;
+  const nextTrust = currentTutorial.trust === 'user-trusted' ? 'untrusted' : 'user-trusted';
+  try {
+    const result = await apiJson('/api/trust', {
+      package_digest: currentTutorial.package_digest,
+      trust: nextTrust,
+    });
+    currentTutorial.trust = result.trust;
+    currentTutorial.trust_default = result.default;
+    renderTrustButton();
+    toast(result.trust === 'user-trusted' ? '已标记为信任' : '已标记为未信任');
+  } catch (e) {
+    toast('更新 trust 失败: ' + e.message, true);
+  }
 }
 
 // ========== 可拖拽分隔线 ==========
@@ -505,6 +539,10 @@ function currentStepObj() {
   return currentTutorial?.steps?.[currentStep] || null;
 }
 
+function currentTutorialKey() {
+  return currentTutorial?.source_key || currentTutorial?.id;
+}
+
 function stepCommand(step, type) {
   return (step?.commands || []).find(cmd => (cmd.type === type || cmd.id === type) && cmd.available !== false) || null;
 }
@@ -576,7 +614,7 @@ async function apiJson(url, body) {
   return payload;
 }
 
-async function loadTutorialList() {
+async function loadTutorialList(opts = {}) {
   try {
     const res = await fetch('/api/tutorials');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -595,16 +633,42 @@ async function loadTutorialList() {
       document.getElementById('loading-msg').style.display = 'none';
       return;
     }
-    sel.innerHTML = tutorials.map(t =>
-      `<option value="${escapeAttr(t.id)}">${escapeAttr(t.title)} (${escapeAttr(t.language)}, ${t.steps} 步)</option>`
+    sel.innerHTML = tutorials.map(t => {
+      const sourceKey = t.source_key || t.id;
+      const sourceLabel = t.source_type === 'installed' ? 'imported' : 'dev';
+      return `<option value="${escapeAttr(sourceKey)}">${escapeAttr(t.title)} (${escapeAttr(t.language)}, ${t.steps} 步, ${sourceLabel})</option>`;
+    }
     ).join('');
     sel.onchange = () => loadTutorial(sel.value);
-    loadTutorial(tutorials[0].id);
+    const selected = tutorials.find(t => {
+      const sourceKey = t.source_key || t.id;
+      if (opts.preferredKey && sourceKey === opts.preferredKey) return true;
+      if (opts.preferredDigest && t.package_digest === opts.preferredDigest) {
+        return !opts.preferredSourceType || t.source_type === opts.preferredSourceType;
+      }
+      return false;
+    }) || tutorials[0];
+    const selectedKey = selected.source_key || selected.id;
+    sel.value = selectedKey;
+    loadTutorial(selectedKey);
   } catch (e) {
     console.error('[MultiLab] 加载教程列表失败:', e);
     document.getElementById('tutorial-content').innerHTML =
       `<p style="color:var(--error)">加载教程列表失败: ${escapeAttr(e.message)}</p>
        <p style="color:var(--text-dim);margin-top:8px">请确认后端服务运行在 <code>http://localhost:${location.port || 3000}</code></p>`;
+  }
+}
+
+async function importPackageFromPath() {
+  const packagePath = prompt('输入本机 .mlab 文件路径。后端会按此路径读取文件。', '');
+  if (!packagePath || !packagePath.trim()) return;
+  try {
+    status('导入 .mlab...');
+    const record = await apiJson('/api/packages/import', { path: packagePath.trim() });
+    await loadTutorialList({ preferredDigest: record.digest, preferredSourceType: 'installed' });
+    toast('已导入 .mlab');
+  } catch (e) {
+    toast('导入失败: ' + e.message, true);
   }
 }
 
@@ -615,6 +679,7 @@ async function loadTutorial(id) {
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => '')}`);
     currentTutorial = await res.json();
     if (!currentTutorial || !currentTutorial.steps?.length) throw new Error('无效的教程数据');
+    renderTrustButton();
     currentStep = 0;
     await enterStep(0, { skipSave: true });
   } catch (e) {
@@ -636,7 +701,7 @@ async function enterStep(targetIndex, opts = {}) {
     renderTutorialStepText();
     status('加载 step...');
     const step = currentStepObj();
-    const result = await apiJson('/api/steps/load', { tutorial: currentTutorial.id, step: step.id });
+    const result = await apiJson('/api/steps/load', { tutorial: currentTutorialKey(), step: step.id });
     if (seq !== _stepLoadSeq) return;
     loadFilesIntoEditor(result.files || []);
     renderTutorialStepText();
@@ -728,7 +793,7 @@ async function saveCurrentStep(opts = {}) {
   const hasDirty = fileModified.some(Boolean);
   if (!hasDirty && !opts.force) return;
   await apiJson('/api/steps/save', {
-    tutorial: currentTutorial.id,
+    tutorial: currentTutorialKey(),
     step: step.id,
     files: currentFiles.map(f => ({ name: f.name, content: f.content })),
   });
@@ -751,7 +816,7 @@ async function resetCurrentStep() {
   if (!currentTutorial || !step) return;
   if (!confirm(`重置当前 step "${step.title || step.id}"？当前 step 的保存会恢复为教程初始状态。`)) return;
   try {
-    const result = await apiJson('/api/steps/reset', { tutorial: currentTutorial.id, step: step.id });
+    const result = await apiJson('/api/steps/reset', { tutorial: currentTutorialKey(), step: step.id });
     loadFilesIntoEditor(result.files || []);
     toast('已重置当前 step');
   } catch (e) {
@@ -850,6 +915,8 @@ document.getElementById('file-picker-overlay').addEventListener('click', (e) => 
 });
 document.getElementById('picker-refresh-btn').addEventListener('click', () => loadFilePickerList(true));
 document.getElementById('tab-open-btn').addEventListener('click', openFilePicker);
+document.getElementById('import-package-btn').addEventListener('click', importPackageFromPath);
+document.getElementById('trust-btn').addEventListener('click', toggleCurrentPackageTrust);
 document.getElementById('save-btn').addEventListener('click', saveFile);
 document.getElementById('revert-btn').addEventListener('click', resetCurrentStep);
 document.getElementById('test-btn').addEventListener('click', runTest);
@@ -904,7 +971,7 @@ async function runCode() {
   }
   ws.send(JSON.stringify({
     type: 'command',
-    tutorial: currentTutorial.id,
+    tutorial: currentTutorialKey(),
     step: step.id,
     command: command.id || command.type,
   }));
@@ -917,7 +984,7 @@ async function runTest() {
   try {
     await saveCurrentStep({ silent: true });
     const res = await apiJson('/api/commands/run', {
-      tutorial: currentTutorial.id,
+      tutorial: currentTutorialKey(),
       step: step.id,
       command: command.id || command.type,
     });

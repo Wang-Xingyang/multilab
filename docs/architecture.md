@@ -55,7 +55,10 @@ Docker is currently the only implemented provider. It now sits behind a small `R
 
 ## Tutorial Loading
 
-Each tutorial directory must contain `multilab.json`.
+Each tutorial source must contain `multilab.json`. The current host supports two source types:
+
+- `development`: an authoring directory under `TUTORIALS_DIR/<id>`.
+- `installed`: an imported package under `.multilab-state/packages/<id>/<version>/<digest>/unpacked/`.
 
 ```text
 tutorials/hello-c/
@@ -69,12 +72,13 @@ tutorials/hello-c/
       test.sh
 ```
 
-Package loading is handled by `server/services/PackageService.js`. It owns manifest loading, deterministic package digest calculation, step content assembly, and command script lookup.
+Package loading is handled by `server/services/PackageService.js`. It owns package source resolution, manifest loading, deterministic package digest calculation, step content assembly, and command script lookup.
 
 The server loads a tutorial with this flow:
 
 ```text
-GET /api/tutorials/:id
+GET /api/tutorials/:source_key
+  PackageService resolves source_key
   PackageService reads multilab.json
   PackageService computes package_digest
   for each step:
@@ -82,6 +86,8 @@ GET /api/tutorials/:id
     read files/*
     return commands[] metadata without script contents
 ```
+
+Development tutorials keep their original id as the source key, so `/api/tutorials/hello-c` continues to open `TUTORIALS_DIR/hello-c`. Installed packages use a digest-derived source key such as `pkg-<sha256hex>` to avoid collisions when multiple packages share the same manifest id.
 
 Scripts are not inlined into the API response. Execution endpoints ask `PackageService` to resolve and read the selected command script when invoked.
 
@@ -93,7 +99,7 @@ Tutorial directories can be packed into a `.mlab` ZIP package with:
 python3 docs/tutorial-skill/scripts/pack_mlab.py <tutorial-dir> -o <package.mlab>
 ```
 
-The packer runs the validator first, writes package files at the ZIP root, and prints the same deterministic `sha256:<hex>` package digest used by save identity. Importing or opening `.mlab` files directly is not implemented yet.
+The packer runs the validator first, writes package files at the ZIP root, and prints the same deterministic `sha256:<hex>` package digest used by save identity.
 
 Packages can also be safely unpacked into a tutorial directory with:
 
@@ -116,7 +122,9 @@ Imported packages are unpacked under:
 .multilab-state/packages/<id>/<version>/<digest>/unpacked/
 ```
 
-`package.lock.json` records id, version, digest, source path, import time, file count, and unpacked directory. The current app-level import API accepts a local file path; browser upload and direct open-from-archive are not implemented yet.
+`package.lock.json` records id, version, digest, source path, import time, file count, and unpacked directory. The current app-level import flow accepts a local file path through the browser UI and calls `POST /api/packages/import`. Browser file upload and direct open-from-archive are not implemented yet.
+
+Imported packages are now included in `/api/tutorials` alongside development tutorials and can be opened by the player through their `source_key`.
 
 ## Command Model
 
@@ -262,6 +270,8 @@ POST /api/trust { package_digest, trust }
 ```
 
 The user-settable trust values are currently `untrusted` and `user-trusted`.
+
+The frontend shows the current package trust state in the header and lets the user toggle between these two values. This persists trust metadata only; runtime selection, sandbox enforcement, and network policy enforcement are still future work.
 
 ## Kernel Registry
 
