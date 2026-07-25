@@ -37,6 +37,7 @@ Node host
   Express APIs
   WebSocket terminal bridge
   PackageService
+  PackageLibrary
   SaveService
   CommandService
   TrustStore
@@ -101,6 +102,21 @@ python3 docs/tutorial-skill/scripts/unpack_mlab.py <package.mlab> -o <tutorial-d
 ```
 
 The unpacker rejects unsafe zip paths, extracts into a temporary directory, validates the extracted tutorial, and only then moves it into place.
+
+The backend can import local `.mlab` files into a local package library:
+
+```text
+POST /api/packages/import { path }
+GET  /api/packages
+```
+
+Imported packages are unpacked under:
+
+```text
+.multilab-state/packages/<id>/<version>/<digest>/unpacked/
+```
+
+`package.lock.json` records id, version, digest, source path, import time, file count, and unpacked directory. The current app-level import API accepts a local file path; browser upload and direct open-from-archive are not implemented yet.
 
 ## Command Model
 
@@ -272,7 +288,7 @@ The resolver currently checks required platform, capabilities, and command names
 ## Known Limitations
 
 - Docker is still the only implemented provider.
-- `.mlab` pack/unpack CLI is implemented; app-level import/open is not implemented.
+- `.mlab` pack/unpack CLI and local path import API are implemented; browser upload/open-from-archive is not implemented.
 - Kernel registry is static and only contains the default Docker kernel.
 - Panel declarations are present in manifests but not fully rendered dynamically.
 - The Docker container is single-session and not suitable for multi-user deployment.

@@ -20,6 +20,8 @@ import { SaveService } from './services/SaveService.js';
 import { CommandService } from './services/CommandService.js';
 import { TrustStore } from './services/TrustStore.js';
 import { createDefaultKernelRegistry } from './services/KernelRegistry.js';
+import { MlabArchiveService } from './services/MlabArchiveService.js';
+import { PackageLibrary } from './services/PackageLibrary.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,6 +39,9 @@ const WORKSPACE_DIR = '/home/student/workspace';
 const RUNTIME_STATE_DIR = process.env.RUNTIME_STATE_DIR
   ? path.resolve(__dirname, process.env.RUNTIME_STATE_DIR)
   : path.join(ROOT, '.multilab-state');
+const PACKAGE_LIBRARY_DIR = process.env.PACKAGE_LIBRARY_DIR
+  ? path.resolve(__dirname, process.env.PACKAGE_LIBRARY_DIR)
+  : path.join(RUNTIME_STATE_DIR, 'packages');
 
 const runtimeProvider = new DockerRuntimeProvider({
   image: EXEC_IMAGE,
@@ -55,6 +60,11 @@ const trustStore = new TrustStore({ runtimeStateDir: RUNTIME_STATE_DIR });
 const kernelRegistry = createDefaultKernelRegistry({
   image: EXEC_IMAGE,
   workspaceDir: WORKSPACE_DIR,
+});
+const archiveService = new MlabArchiveService();
+const packageLibrary = new PackageLibrary({
+  libraryDir: PACKAGE_LIBRARY_DIR,
+  archiveService,
 });
 
 // ---------- 1. Express ----------
@@ -108,6 +118,24 @@ app.get('/api/kernels/resolve', async (req, res) => {
     if (!tutorialId) return res.status(400).json({ error: 'tutorial required' });
     const tutorial = await packageService.loadTutorial(tutorialId);
     res.json(kernelRegistry.resolveForPackage(tutorial));
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message });
+  }
+});
+
+app.get('/api/packages', async (req, res) => {
+  try {
+    res.json({ packages: await packageLibrary.listPackages() });
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message });
+  }
+});
+
+app.post('/api/packages/import', async (req, res) => {
+  try {
+    const { path: packagePath } = req.body;
+    if (!packagePath) return res.status(400).json({ error: 'path required' });
+    res.json(await packageLibrary.importArchive(packagePath));
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message });
   }
