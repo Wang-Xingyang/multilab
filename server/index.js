@@ -18,6 +18,7 @@ import {
 } from './services/PackageService.js';
 import { SaveService } from './services/SaveService.js';
 import { CommandService } from './services/CommandService.js';
+import { TrustStore } from './services/TrustStore.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -49,6 +50,7 @@ const saveService = new SaveService({
   packageService,
 });
 const commandService = new CommandService({ packageService, runtimeSession });
+const trustStore = new TrustStore({ runtimeStateDir: RUNTIME_STATE_DIR });
 
 // ---------- 1. Express ----------
 const app = express();
@@ -58,10 +60,32 @@ app.use(express.static(path.join(ROOT, 'public')));
 // 教程列表
 app.get('/api/tutorials', async (req, res) => {
   try {
-    const tutorials = await packageService.listTutorialSummaries();
+    const tutorials = await Promise.all(
+      (await packageService.listTutorialSummaries()).map(tutorial => trustStore.annotatePackage(tutorial))
+    );
     res.json({ tutorials, expectedDir: TUTORIALS_DIR });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/trust', async (req, res) => {
+  try {
+    const packageDigest = req.query.package_digest;
+    if (!packageDigest) return res.status(400).json({ error: 'package_digest required' });
+    res.json(await trustStore.getPackageTrust(packageDigest));
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message });
+  }
+});
+
+app.post('/api/trust', async (req, res) => {
+  try {
+    const { package_digest: packageDigest, trust } = req.body;
+    if (!packageDigest || !trust) return res.status(400).json({ error: 'package_digest and trust required' });
+    res.json(await trustStore.setPackageTrust(packageDigest, trust));
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message });
   }
 });
 
@@ -77,7 +101,13 @@ function validateContainerPath(filePath) {
 // 单个教程详情 — 返回组装后的完整内容
 app.get('/api/tutorials/:id', async (req, res) => {
   try {
-    res.json(await packageService.loadTutorial(req.params.id));
+    const tutorial = await packageService.loadTutorial(req.params.id);
+    const trust = await trustStore.getPackageTrust(tutorial.package_digest);
+    res.json({
+      ...tutorial,
+      trust: trust.trust,
+      trust_default: trust.default,
+    });
   } catch (e) {
     res.status(404).json({ error: `tutorial not found: ${req.params.id}` });
   }

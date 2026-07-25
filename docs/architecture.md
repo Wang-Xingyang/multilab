@@ -39,6 +39,7 @@ Node host
   PackageService
   SaveService
   CommandService
+  TrustStore
   RuntimeProvider abstraction
 
 Docker runtime
@@ -227,6 +228,7 @@ Current practical protections:
 - file APIs restrict paths to `/home/student/workspace`;
 - tutorial scripts are loaded from package paths after path validation;
 - test/check commands run inside the Docker runtime, not on the host.
+- package trust defaults to `untrusted` and is stored by package digest under `.multilab-state/trust.json`.
 
 Target security model:
 
@@ -234,6 +236,15 @@ Target security model:
 - sandbox-capable kernel required by default for untrusted packages;
 - Docker provider as first official sandbox provider;
 - future provider abstraction for WSL/local/remote/Wasm/VM.
+
+Current trust APIs:
+
+```text
+GET  /api/trust?package_digest=<sha256:...>
+POST /api/trust { package_digest, trust }
+```
+
+The user-settable trust values are currently `untrusted` and `user-trusted`.
 
 ## Known Limitations
 
