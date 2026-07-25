@@ -36,9 +36,9 @@ Browser UI
 Node host
   Express APIs
   WebSocket terminal bridge
-  tutorial loader
-  step save state
-  command executor
+  PackageService
+  SaveService
+  CommandService
   RuntimeProvider abstraction
 
 Docker runtime
@@ -66,18 +66,21 @@ tutorials/hello-c/
       test.sh
 ```
 
+Package loading is handled by `server/services/PackageService.js`. It owns manifest loading, deterministic package digest calculation, step content assembly, and command script lookup.
+
 The server loads a tutorial with this flow:
 
 ```text
 GET /api/tutorials/:id
-  read multilab.json
+  PackageService reads multilab.json
+  PackageService computes package_digest
   for each step:
     read instructions.md
     read files/*
     return commands[] metadata without script contents
 ```
 
-Scripts are not inlined into the API response. Execution endpoints read scripts from disk when invoked.
+Scripts are not inlined into the API response. Execution endpoints ask `PackageService` to resolve and read the selected command script when invoked.
 
 ## Command Model
 
@@ -107,6 +110,8 @@ Current execution modes:
 
 - `interactive`: executed through the WebSocket terminal.
 - `captured`: executed through `POST /api/commands/run`.
+
+Command execution is coordinated by `server/services/CommandService.js`. It asks `PackageService` to resolve the declared script, uploads that script through `RuntimeSession`, and dispatches to either captured execution or an attached interactive terminal.
 
 ### Interactive Command Flow
 
@@ -175,6 +180,8 @@ overlay_template
 ```
 
 Current implementation intentionally does not overwrite learner files during `overlay_template`.
+
+Step load/save/reset is handled by `server/services/SaveService.js`. It owns save identity paths, host save file IO, first-entry inheritance, reset behavior, and workspace synchronization through `RuntimeSession`.
 
 ## Save Storage
 

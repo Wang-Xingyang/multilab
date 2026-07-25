@@ -10,10 +10,14 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import http from 'http';
 import path from 'path';
-import fs from 'fs/promises';
-import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { DockerRuntimeProvider } from './runtime/DockerRuntimeProvider.js';
+import {
+  PackageService,
+  validateFileName,
+} from './services/PackageService.js';
+import { SaveService } from './services/SaveService.js';
+import { CommandService } from './services/CommandService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,6 +42,13 @@ const runtimeProvider = new DockerRuntimeProvider({
   workspaceDir: WORKSPACE_DIR,
 });
 const runtimeSession = runtimeProvider.session;
+const packageService = new PackageService({ tutorialsDir: TUTORIALS_DIR });
+const saveService = new SaveService({
+  runtimeStateDir: RUNTIME_STATE_DIR,
+  runtimeSession,
+  packageService,
+});
+const commandService = new CommandService({ packageService, runtimeSession });
 
 // ---------- 1. Express ----------
 const app = express();
@@ -47,62 +58,12 @@ app.use(express.static(path.join(ROOT, 'public')));
 // 教程列表
 app.get('/api/tutorials', async (req, res) => {
   try {
-    const dir = TUTORIALS_DIR;
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-    const tutorials = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      try {
-        const { cfg, packageFormat, sourceFile, packageDigest } = await loadTutorialConfig(entry.name);
-        tutorials.push({
-          id: entry.name,
-          title: cfg.title,
-          description: cfg.description,
-          language: cfg.language,
-          version: cfg.version || '0.0.0',
-          package_digest: packageDigest,
-          schema_version: cfg.schema_version || 0,
-          package_format: packageFormat,
-          source_file: sourceFile,
-          steps: (cfg.steps || []).length,
-        });
-      } catch (e) {
-        // 跳过格式错误的教程
-      }
-    }
+    const tutorials = await packageService.listTutorialSummaries();
     res.json({ tutorials, expectedDir: TUTORIALS_DIR });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
-
-// ---------- 1.5 MultiLab package loading ----------
-// multilab.json is the package manifest. Instructions, starter files, and
-// command scripts live as real files under each step directory.
-
-const LANG_BY_EXT = {
-  '.c': 'c', '.h': 'c', '.cpp': 'cpp', '.cc': 'cpp', '.hpp': 'cpp',
-  '.py': 'python', '.js': 'javascript', '.ts': 'typescript',
-  '.sh': 'bash', '.rs': 'rust', '.go': 'go', '.java': 'java',
-};
-
-const MANIFEST_FILE = 'multilab.json';
-const VALID_INHERIT_MODES = new Set(['template', 'previous_save', 'overlay_template']);
-
-// ---- input validation helpers ----
-function validateId(id) {
-  if (!id || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$/.test(id)) {
-    throw Object.assign(new Error('Invalid identifier'), { statusCode: 400 });
-  }
-}
-
-function validateSafePath(id) {
-  validateId(id);
-  if (id.includes('..') || id.includes('/') || id.includes('\\')) {
-    throw Object.assign(new Error('Invalid path'), { statusCode: 400 });
-  }
-  return id;
-}
 
 function validateContainerPath(filePath) {
   const input = filePath.startsWith('/') ? filePath : path.posix.join(WORKSPACE_DIR, filePath);
@@ -113,401 +74,10 @@ function validateContainerPath(filePath) {
   return resolved;
 }
 
-function validateFileName(name) {
-  if (!name || name.includes('/') || name.includes('\\') || name.includes('..')) {
-    throw Object.assign(new Error('Invalid file name'), { statusCode: 400 });
-  }
-  return name;
-}
-
-function validatePackageRelativePath(relPath) {
-  if (!relPath || path.isAbsolute(relPath)) {
-    throw Object.assign(new Error('Invalid package path'), { statusCode: 400 });
-  }
-  const normalized = path.normalize(relPath);
-  if (normalized.startsWith('..') || normalized.includes(`..${path.sep}`)) {
-    throw Object.assign(new Error('Invalid package path'), { statusCode: 400 });
-  }
-  return normalized;
-}
-
-function resolvePackagePath(tutorialDir, relPath) {
-  const safeRel = validatePackageRelativePath(relPath);
-  const resolved = path.resolve(tutorialDir, safeRel);
-  if (resolved !== tutorialDir && !resolved.startsWith(tutorialDir + path.sep)) {
-    throw Object.assign(new Error('Package path escapes tutorial directory'), { statusCode: 403 });
-  }
-  return resolved;
-}
-
-async function pathExists(filePath) {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function readJsonFile(filePath) {
-  return JSON.parse(await fs.readFile(filePath, 'utf8'));
-}
-
-async function listPackageFiles(rootDir, currentDir = rootDir) {
-  const entries = await fs.readdir(currentDir, { withFileTypes: true });
-  const files = [];
-  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-    const absPath = path.join(currentDir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...await listPackageFiles(rootDir, absPath));
-    } else if (entry.isFile()) {
-      files.push(path.relative(rootDir, absPath).split(path.sep).join('/'));
-    }
-  }
-  return files;
-}
-
-async function computePackageDigest(tutorialDir) {
-  const hash = crypto.createHash('sha256');
-  const files = await listPackageFiles(tutorialDir);
-  for (const relPath of files) {
-    const content = await fs.readFile(path.join(tutorialDir, relPath));
-    hash.update('file\0');
-    hash.update(relPath);
-    hash.update('\0');
-    hash.update(String(content.length));
-    hash.update('\0');
-    hash.update(content);
-    hash.update('\0');
-  }
-  return `sha256:${hash.digest('hex')}`;
-}
-
-function digestPathSegment(digest) {
-  const segment = String(digest || '').replace(/^sha256:/, 'sha256-');
-  if (!/^[a-zA-Z0-9_.-]+$/.test(segment)) {
-    throw Object.assign(new Error('Invalid package digest'), { statusCode: 400 });
-  }
-  return segment;
-}
-
-function validateStorageSegment(value, fieldName) {
-  const segment = String(value || '');
-  if (!segment || segment.includes('..') || !/^[a-zA-Z0-9_.+-]+$/.test(segment)) {
-    throw Object.assign(new Error(`Invalid ${fieldName}`), { statusCode: 400 });
-  }
-  return segment;
-}
-
-async function loadTutorialConfig(tutorialId) {
-  validateSafePath(tutorialId);
-  const tutorialDir = path.join(TUTORIALS_DIR, tutorialId);
-  const manifestPath = path.join(tutorialDir, MANIFEST_FILE);
-  const cfg = await readJsonFile(manifestPath);
-  cfg.id = cfg.id || tutorialId;
-  const packageDigest = await computePackageDigest(tutorialDir);
-  return { cfg, tutorialDir, packageFormat: 'multilab', sourceFile: MANIFEST_FILE, packageDigest };
-}
-
-function stepInheritMode(step) {
-  const explicit = step.inherit_mode;
-  if (explicit && VALID_INHERIT_MODES.has(explicit)) return explicit;
-  return step.chain ? 'previous_save' : 'template';
-}
-
-function commandForType(step, type) {
-  return (step.commands || []).find(cmd => cmd && (cmd.type === type || cmd.id === type));
-}
-
-function commandScriptPath(tutorialDir, step, type) {
-  const command = commandForType(step, type);
-  if (!command?.script) return null;
-  return resolvePackagePath(tutorialDir, command.script);
-}
-
-async function getStepCommandScript(tutorialId, stepId, commandIdOrType) {
-  const { cfg, tutorialDir } = await loadTutorialConfig(tutorialId);
-  const step = findStep(cfg, stepId);
-  const command = commandForType(step, commandIdOrType);
-  if (!command) {
-    throw Object.assign(new Error(`command not found: ${commandIdOrType}`), { statusCode: 404 });
-  }
-  const scriptPath = commandScriptPath(tutorialDir, step, commandIdOrType);
-  if (!scriptPath || !(await pathExists(scriptPath))) {
-    throw Object.assign(new Error(`command script not found: ${commandIdOrType}`), { statusCode: 404 });
-  }
-  return {
-    cfg,
-    step,
-    command,
-    script: await fs.readFile(scriptPath, 'utf8'),
-  };
-}
-
-async function ensureRuntimeDirs() {
-  await fs.mkdir(path.join(RUNTIME_STATE_DIR, 'saves'), { recursive: true });
-  await ensureWorkspaceDir();
-}
-
-async function ensureWorkspaceDir() {
-  await runtimeSession.ensureWorkspace();
-}
-
-function packageSaveRoot(cfg) {
-  const packageId = validateSafePath(cfg.id);
-  const version = validateStorageSegment(cfg.version || '0.0.0', 'package version');
-  const digest = digestPathSegment(cfg.package_digest);
-  return path.join(RUNTIME_STATE_DIR, 'saves', packageId, version, digest);
-}
-
-function saveDir(cfg, stepId) {
-  return path.join(packageSaveRoot(cfg), 'steps', validateSafePath(stepId), 'files');
-}
-
-function stepChain(step) {
-  return step.chain || step.id;
-}
-
-function findStep(cfg, stepId) {
-  const step = (cfg.steps || []).find(s => s.id === stepId);
-  if (!step) throw Object.assign(new Error(`step not found: ${stepId}`), { statusCode: 404 });
-  return step;
-}
-
-function findChainFirstStep(cfg, chain) {
-  return (cfg.steps || []).find(s => stepChain(s) === chain);
-}
-
-async function dirExists(dir) {
-  try {
-    return (await fs.stat(dir)).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-async function clearHostDir(dir) {
-  await fs.rm(dir, { recursive: true, force: true });
-  await fs.mkdir(dir, { recursive: true });
-}
-
-async function writeStepTemplateToDir(step, destDir) {
-  await clearHostDir(destDir);
-  for (const f of step.files || []) {
-    const name = validateFileName(f.name || 'untitled');
-    await fs.writeFile(path.join(destDir, name), f.content || '', 'utf8');
-  }
-}
-
-async function readHostFiles(dir) {
-  const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
-  const files = [];
-  for (const entry of entries.filter(e => e.isFile()).sort((a, b) => a.name.localeCompare(b.name))) {
-    const name = entry.name;
-    validateFileName(name);
-    const ext = path.extname(name).toLowerCase();
-    files.push({
-      name,
-      content: await fs.readFile(path.join(dir, name), 'utf8'),
-      language: LANG_BY_EXT[ext] || 'plaintext',
-    });
-  }
-  return files;
-}
-
-async function loadWorkspaceFiles() {
-  const files = await runtimeSession.readFiles();
-  return files.map(file => {
-    const name = validateFileName(file.name);
-    const ext = path.extname(name).toLowerCase();
-    return {
-      name,
-      content: file.content,
-      language: LANG_BY_EXT[ext] || 'plaintext',
-    };
-  });
-}
-
-async function writeHostFiles(dir, files) {
-  await clearHostDir(dir);
-  for (const f of files || []) {
-    const name = validateFileName(f.name || 'untitled');
-    await fs.writeFile(path.join(dir, name), f.content || '', 'utf8');
-  }
-}
-
-async function writeFilesToWorkspace(files, opts = {}) {
-  const normalizedFiles = (files || []).map(f => {
-    const name = validateFileName(f.name || 'untitled');
-    return { name, content: f.content || '' };
-  });
-  await runtimeSession.writeFiles(normalizedFiles, opts);
-}
-
-async function loadStepState(tutorialId, stepId) {
-  validateSafePath(tutorialId);
-  validateSafePath(stepId);
-  await ensureRuntimeDirs();
-  const cfg = await loadTutorial(tutorialId);
-  const step = findStep(cfg, stepId);
-  const ownSaveDir = saveDir(cfg, step.id);
-  const mode = stepInheritMode(step);
-  let sourceStep = step.id;
-  let hasOwnSave = await dirExists(ownSaveDir);
-  let files;
-
-  if (hasOwnSave) {
-    files = await readHostFiles(ownSaveDir);
-  } else if (mode === 'template') {
-    await writeStepTemplateToDir(step, ownSaveDir);
-    files = await readHostFiles(ownSaveDir);
-    hasOwnSave = true;
-  } else {
-    const chain = stepChain(step);
-    const steps = cfg.steps || [];
-    const idx = steps.findIndex(s => s.id === step.id);
-    let sourceDir = null;
-    for (let i = idx - 1; i >= 0; i--) {
-      if (stepChain(steps[i]) !== chain) continue;
-      const prevSaveDir = saveDir(cfg, steps[i].id);
-      if (await dirExists(prevSaveDir)) {
-        sourceDir = prevSaveDir;
-        sourceStep = steps[i].id;
-        break;
-      }
-    }
-    if (!sourceDir) {
-      const first = findChainFirstStep(cfg, chain) || step;
-      sourceDir = saveDir(cfg, first.id);
-      sourceStep = first.id;
-      if (!(await dirExists(sourceDir))) {
-        await writeStepTemplateToDir(first, sourceDir);
-      }
-      hasOwnSave = first.id === step.id;
-    }
-
-    files = await readHostFiles(sourceDir);
-
-    if (mode === 'overlay_template') {
-      const byName = new Map(files.map(f => [f.name, f]));
-      for (const templateFile of step.files || []) {
-        // Conservative first implementation: only add missing template files.
-        // Explicit overwrite semantics can be added later without risking learner edits.
-        if (!byName.has(templateFile.name)) byName.set(templateFile.name, templateFile);
-      }
-      files = Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
-    }
-  }
-
-  await writeFilesToWorkspace(files);
-  return {
-    tutorial: tutorialId,
-    step: step.id,
-    sourceStep,
-    hasOwnSave,
-    inheritMode: mode,
-    files,
-  };
-}
-
-async function saveStepState(tutorialId, stepId, files) {
-  validateSafePath(tutorialId);
-  validateSafePath(stepId);
-  await ensureRuntimeDirs();
-  const cfg = await loadTutorial(tutorialId);
-  const step = findStep(cfg, stepId);
-  const dest = saveDir(cfg, step.id);
-  const providedFiles = Array.isArray(files) ? files : null;
-  const normalizedFiles = (providedFiles || []).map(f => ({
-    name: validateFileName(f.name || 'untitled'),
-    content: f.content || '',
-  }));
-  if (providedFiles) await writeFilesToWorkspace(normalizedFiles, { clear: false });
-  const workspaceFiles = await loadWorkspaceFiles();
-  await writeHostFiles(dest, workspaceFiles);
-  return { tutorial: tutorialId, step: step.id, hasOwnSave: true };
-}
-
-async function resetStepState(tutorialId, stepId) {
-  validateSafePath(tutorialId);
-  validateSafePath(stepId);
-  await ensureRuntimeDirs();
-  const cfg = await loadTutorial(tutorialId);
-  const step = findStep(cfg, stepId);
-  const dest = saveDir(cfg, step.id);
-  await writeStepTemplateToDir(step, dest);
-  const files = await readHostFiles(dest);
-  await writeFilesToWorkspace(files);
-  return {
-    tutorial: tutorialId,
-    step: step.id,
-    hasOwnSave: true,
-    files,
-  };
-}
-
-async function loadTutorial(tutorialId) {
-  const { cfg, tutorialDir, packageFormat, sourceFile, packageDigest } = await loadTutorialConfig(tutorialId);
-  cfg.package_format = packageFormat;
-  cfg.source_file = sourceFile;
-  cfg.package_digest = packageDigest;
-  cfg.schema_version = cfg.schema_version || 0;
-  cfg.version = cfg.version || '0.0.0';
-
-  // 逐 step 组装文件化内容
-  for (const step of cfg.steps || []) {
-    validateSafePath(step.id);
-    const stepDir = path.join(tutorialDir, 'steps', step.id);
-    step.inherit_mode = stepInheritMode(step);
-
-    // 1) instructions.md → step.instructions
-    try {
-      step.instructions = await fs.readFile(path.join(stepDir, 'instructions.md'), 'utf8');
-    } catch {
-      step.instructions = '';  // 没有说明文件就空着
-    }
-
-    // 2) files/ 下所有文件 → step.files [{name, content, language}]
-    step.files = [];
-    const filesDir = path.join(stepDir, 'files');
-    try {
-      const entries = await fs.readdir(filesDir, { withFileTypes: true });
-      for (const e of entries) {
-        if (!e.isFile()) continue;
-        validateFileName(e.name);
-        const content = await fs.readFile(path.join(filesDir, e.name), 'utf8');
-        const ext = path.extname(e.name).toLowerCase();
-        step.files.push({
-          name: e.name,
-          content,
-          language: LANG_BY_EXT[ext] || cfg.language || 'plaintext',
-        });
-      }
-    } catch {
-      // files/ 目录不存在或空,step.files 保持原样 (可为空数组)
-    }
-
-    // 3) commands are first-class manifest objects. Do not inline script content
-    //    into the API response; execution endpoints read scripts from disk.
-    step.commands = await Promise.all((step.commands || []).map(async command => {
-      const scriptPath = command?.script ? resolvePackagePath(tutorialDir, command.script) : null;
-      return {
-        id: command.id,
-        type: command.type,
-        label: command.label || command.id || command.type,
-        terminal: command.terminal || (command.type === 'run' ? 'interactive' : 'captured'),
-        timeout_sec: command.timeout_sec,
-        available: Boolean(scriptPath && await pathExists(scriptPath)),
-      };
-    }));
-  }
-  return cfg;
-}
-
 // 单个教程详情 — 返回组装后的完整内容
 app.get('/api/tutorials/:id', async (req, res) => {
   try {
-    res.json(await loadTutorial(req.params.id));
+    res.json(await packageService.loadTutorial(req.params.id));
   } catch (e) {
     res.status(404).json({ error: `tutorial not found: ${req.params.id}` });
   }
@@ -518,7 +88,7 @@ app.post('/api/steps/load', async (req, res) => {
   try {
     const { tutorial, step } = req.body;
     if (!tutorial || !step) return res.status(400).json({ error: 'tutorial and step required' });
-    res.json(await loadStepState(tutorial, step));
+    res.json(await saveService.loadStepState(tutorial, step));
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message });
   }
@@ -529,7 +99,7 @@ app.post('/api/steps/save', async (req, res) => {
   try {
     const { tutorial, step, files } = req.body;
     if (!tutorial || !step) return res.status(400).json({ error: 'tutorial and step required' });
-    res.json(await saveStepState(tutorial, step, files));
+    res.json(await saveService.saveStepState(tutorial, step, files));
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message });
   }
@@ -540,19 +110,11 @@ app.post('/api/steps/reset', async (req, res) => {
   try {
     const { tutorial, step } = req.body;
     if (!tutorial || !step) return res.status(400).json({ error: 'tutorial and step required' });
-    res.json(await resetStepState(tutorial, step));
+    res.json(await saveService.resetStepState(tutorial, step));
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message });
   }
 });
-
-async function writeScriptToContainer(script, remotePath) {
-  await runtimeSession.uploadScript(script, remotePath);
-}
-
-function remoteCommandPath(stepId, commandId) {
-  return `/tmp/${validateSafePath(stepId)}.${validateSafePath(commandId)}.sh`;
-}
 
 // Execute a captured command declared in multilab.json.
 // body: { tutorial, step, command } → { exitCode, passed, output }
@@ -562,24 +124,7 @@ app.post('/api/commands/run', async (req, res) => {
     if (!tutorial || !step || !command) {
       return res.status(400).json({ error: 'tutorial, step and command required' });
     }
-    validateSafePath(tutorial);
-    validateSafePath(step);
-    validateSafePath(command);
-
-    const commandSpec = await getStepCommandScript(tutorial, step, command);
-    if (commandSpec.command.terminal === 'interactive') {
-      return res.status(400).json({ error: 'interactive command must run through WebSocket terminal' });
-    }
-
-    const remoteScript = remoteCommandPath(step, command);
-    await writeScriptToContainer(commandSpec.script, remoteScript);
-    const r = await runtimeSession.runCaptured(remoteScript);
-    res.json({
-      command,
-      exitCode: r.exitCode,
-      passed: r.exitCode === 0,
-      output: (r.stdout + (r.stderr ? '\n' + r.stderr : '')).trim(),
-    });
+    res.json(await commandService.runCapturedCommand({ tutorial, step, command }));
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message });
   }
@@ -696,15 +241,7 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: 'tutorial, step and command required' }));
           return;
         }
-        const commandSpec = await getStepCommandScript(tutorial, step, command);
-        if (commandSpec.command.terminal === 'captured') {
-          ws.send(JSON.stringify({ type: 'error', message: 'captured command must run through /api/commands/run' }));
-          return;
-        }
-
-        const remoteScript = remoteCommandPath(step, command);
-        await writeScriptToContainer(commandSpec.script, remoteScript);
-        terminal.runScript(remoteScript);
+        await commandService.runInteractiveCommand({ tutorial, step, command, terminal });
         ws.send(JSON.stringify({ type: 'status', message: `running command: ${command}` }));
       } catch (e) {
         ws.send(JSON.stringify({ type: 'error', message: e.message }));
