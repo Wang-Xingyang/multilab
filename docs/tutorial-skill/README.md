@@ -24,6 +24,7 @@ tutorial-skill/
     tutorial-template/
   scripts/
     validate_tutorial.py
+    pack_mlab.py
 ```
 
 ## Validate A Tutorial
@@ -32,6 +33,15 @@ tutorial-skill/
 cd multilab
 python3 docs/tutorial-skill/scripts/validate_tutorial.py ../tutorials/hello-c
 ```
+
+## Pack A Tutorial
+
+```bash
+cd multilab
+python3 docs/tutorial-skill/scripts/pack_mlab.py ../tutorials/hello-c -o /tmp/hello-c.mlab
+```
+
+The packer validates the tutorial first, then writes a `.mlab` ZIP package with `multilab.json` at the root and prints the package digest.
 
 ## Use The Template
 

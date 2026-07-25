@@ -223,11 +223,21 @@ The validator checks:
 - `inherit_mode`;
 - common path and output mistakes.
 
+## Packing
+
+```bash
+cd multilab
+python3 docs/tutorial-skill/scripts/pack_mlab.py ../tutorials/hello-c -o /tmp/hello-c.mlab
+```
+
+The packer validates the tutorial first, writes a `.mlab` ZIP package, and prints the deterministic package digest used by save identity.
+
 ## Recommended AI Workflow
 
 1. Generate a tutorial directory.
 2. Write `multilab.json`.
 3. Write step `instructions.md`, `files/`, and `commands/`.
 4. Run the validator.
-5. Manually inspect command scripts.
-6. Import or run in MultiLab.
+5. Pack the tutorial into `.mlab` when it is ready to share.
+6. Manually inspect command scripts.
+7. Import or run in MultiLab.

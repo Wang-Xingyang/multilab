@@ -82,6 +82,16 @@ GET /api/tutorials/:id
 
 Scripts are not inlined into the API response. Execution endpoints ask `PackageService` to resolve and read the selected command script when invoked.
 
+## Packaging
+
+Tutorial directories can be packed into a `.mlab` ZIP package with:
+
+```bash
+python3 docs/tutorial-skill/scripts/pack_mlab.py <tutorial-dir> -o <package.mlab>
+```
+
+The packer runs the validator first, writes package files at the ZIP root, and prints the same deterministic `sha256:<hex>` package digest used by save identity. Importing or opening `.mlab` files directly is not implemented yet.
+
 ## Command Model
 
 Commands are first-class manifest objects:
@@ -220,6 +230,6 @@ Target security model:
 ## Known Limitations
 
 - Docker is still the only implemented provider.
-- `.mlab` pack/unpack is not implemented.
+- `.mlab` pack is implemented; import/open/unpack is not implemented.
 - Panel declarations are present in manifests but not fully rendered dynamically.
 - The Docker container is single-session and not suitable for multi-user deployment.
