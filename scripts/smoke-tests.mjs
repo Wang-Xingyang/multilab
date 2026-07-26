@@ -27,6 +27,7 @@ import {
   rewritePreviewUrl,
   buildPreviewMeta,
 } from '../server/services/PreviewPortMap.js';
+import { t, getCatalog } from '../public/js/messages.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -194,6 +195,13 @@ await test('PreviewPortMap rewrites container URLs via host map', () => {
   const meta = buildPreviewMeta('ready\nMULTILAB_PREVIEW_URL=http://127.0.0.1:5173/\n', { 5173: 19090 });
   assert.equal(meta.preview_url, 'http://127.0.0.1:19090/');
   assert.equal(meta.preview_advertised_url, 'http://127.0.0.1:5173/');
+});
+
+await test('Frontend messages catalog resolves keys', () => {
+  assert.equal(t('trust.trusted'), '已信任');
+  assert.equal(t('kernel.switched', { id: 'gcc' }), '已切换到 gcc');
+  assert.ok(Object.keys(getCatalog().commands).length >= 5);
+  assert.equal(t('missing.key.not.real'), 'missing.key.not.real');
 });
 
 await test('KernelRegistry picks net kernel when network/preview ports required', () => {

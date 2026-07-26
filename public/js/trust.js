@@ -1,5 +1,6 @@
 import { apiJson } from './api.js';
 import { toast } from './ui.js';
+import { t } from './messages.js';
 
 let pendingNextTrust = null;
 let onTrustChanged = null;
@@ -22,14 +23,14 @@ export function openTrustDialog(tutorial) {
   const digest = document.getElementById('trust-dialog-digest');
   const confirmBtn = document.getElementById('trust-confirm-btn');
   if (pendingNextTrust === 'user-trusted') {
-    title.textContent = '确认信任此教程包？';
-    body.textContent = '信任表示你接受运行该包声明的命令。MultiLab 仍会按 security / sandbox / network 策略限制执行。不要信任来源不明的包。';
-    confirmBtn.textContent = '确认信任';
+    title.textContent = t('trust.confirmGrantTitle');
+    body.textContent = t('trust.confirmGrantBody');
+    confirmBtn.textContent = t('trust.confirmGrantAction');
     confirmBtn.className = 'primary';
   } else {
-    title.textContent = '取消信任此教程包？';
-    body.textContent = '取消后该包将回到未信任状态。需要 sandbox 的命令仍可按策略运行，但不会享受“用户信任”标记。';
-    confirmBtn.textContent = '取消信任';
+    title.textContent = t('trust.confirmRevokeTitle');
+    body.textContent = t('trust.confirmRevokeBody');
+    confirmBtn.textContent = t('trust.confirmRevokeAction');
     confirmBtn.className = 'danger';
   }
   digest.textContent = tutorial.package_digest;
@@ -49,7 +50,7 @@ async function confirmTrustDialog() {
   try {
     await onTrustChanged(nextTrust);
   } catch (e) {
-    toast('更新 trust 失败: ' + e.message, true);
+    toast(t('trust.updateFailed', { error: e.message }), true);
   }
 }
 

@@ -8,7 +8,7 @@ It runs tutorial packages that declare a `multilab.json` manifest, provide real 
 
 This repository is an early prototype of the MultiLab host:
 
-- frontend: `public/index.html` shell plus no-bundler ES modules under `public/js/` (Monaco + xterm.js);
+- frontend: `public/index.html` shell plus no-bundler ES modules under `public/js/` (shared `state` / `messages`, feature modules, Monaco + xterm.js);
 - backend: Node ESM services behind `server/index.js` (Express + WebSocket);
 - runtime: `docker/os.Dockerfile` behind a `RuntimeProvider` abstraction;
 - package format: `multilab.json` directories and `.mlab` ZIP packages;

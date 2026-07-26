@@ -35,3 +35,7 @@ sessions/
 # Tutorial 临时文件
 *.tmp
 *.bak
+
+# Python bytecode (e.g. docs/tutorial-skill/scripts/)
+__pycache__/
+*.py[cod]

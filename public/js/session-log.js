@@ -1,3 +1,4 @@
+import { t } from './messages.js';
 const MAX_LOGS = 200;
 const entries = [];
 

@@ -1,4 +1,5 @@
 import { escapeAttr } from './ui.js';
+import { t } from './messages.js';
 
 function kv(rows) {
   return `<div class="diag-kv">${rows.map(([k, v]) =>
