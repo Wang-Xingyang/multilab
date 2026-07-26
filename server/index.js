@@ -22,6 +22,7 @@ import { SaveService } from './services/SaveService.js';
 import { CommandService } from './services/CommandService.js';
 import { TrustStore } from './services/TrustStore.js';
 import { createDefaultKernelRegistry } from './services/KernelRegistry.js';
+import { KernelSelectionStore } from './services/KernelSelectionStore.js';
 import { MlabArchiveService } from './services/MlabArchiveService.js';
 import { MlabSaveArchiveService } from './services/MlabSaveArchiveService.js';
 import { PackageLibrary } from './services/PackageLibrary.js';
@@ -66,10 +67,12 @@ const kernelRegistry = createDefaultKernelRegistry({
   image: EXEC_IMAGE,
   workspaceDir: WORKSPACE_DIR,
 });
+const kernelSelectionStore = new KernelSelectionStore({ runtimeStateDir: RUNTIME_STATE_DIR });
 const runtimeManager = new RuntimeManager({
   providers: { docker: dockerRuntimeProvider },
   kernelRegistry,
   packageService,
+  kernelSelectionStore,
 });
 const saveService = new SaveService({
   runtimeStateDir: RUNTIME_STATE_DIR,
@@ -82,6 +85,7 @@ const securityPolicyService = new SecurityPolicyService({
   packageService,
   trustStore,
   kernelRegistry,
+  kernelSelectionStore,
 });
 const commandService = new CommandService({
   packageService,
@@ -144,7 +148,8 @@ app.get('/api/kernels/resolve', async (req, res) => {
     const tutorialId = req.query.tutorial;
     if (!tutorialId) return res.status(400).json({ error: 'tutorial required' });
     const tutorial = await packageService.loadTutorial(tutorialId);
-    const resolution = kernelRegistry.resolveForPackage(tutorial);
+    const preferredKernelId = await kernelSelectionStore.getPreferredKernel(tutorial.package_digest);
+    const resolution = kernelRegistry.resolveForPackage(tutorial, { preferredKernelId });
     let runtime = null;
     if (resolution.selected) {
       const provider = runtimeManager.getProviderForKernel(resolution.selected);
@@ -177,6 +182,38 @@ app.get('/api/runtime', async (req, res) => {
     });
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message });
+  }
+});
+
+app.post('/api/runtime/select', async (req, res) => {
+  try {
+    const { tutorial, kernel_id: kernelId } = req.body;
+    if (!tutorial || !kernelId) {
+      return res.status(400).json({ error: 'tutorial and kernel_id required' });
+    }
+    const selected = await runtimeManager.selectKernelForTutorial(tutorial, kernelId);
+    const provider = runtimeManager.getProviderForKernel(selected.kernel);
+    const plan = provider.planKernelSession
+      ? provider.planKernelSession(selected.kernel)
+      : selected.plan;
+    res.json({
+      tutorial,
+      package_digest: selected.package_digest,
+      kernel: selected.kernel,
+      replaced: selected.replaced,
+      preferred_applied: selected.resolution.preferred_applied,
+      runtime: {
+        provider: selected.kernel.provider,
+        network_mode: plan?.networkMode || null,
+        sandbox_preset: plan?.sandboxPreset || null,
+        image: plan?.image || selected.kernel.image || null,
+        active: true,
+        active_kernel_id: selected.kernel.id,
+      },
+      candidates: selected.resolution.candidates,
+    });
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message, code: e.code });
   }
 });
 
@@ -490,7 +527,11 @@ wss.on('connection', (ws) => {
         await commandService.runInteractiveCommand({ tutorial, step, command, terminal });
         ws.send(JSON.stringify({ type: 'status', message: `running command: ${command}` }));
       } catch (e) {
-        ws.send(JSON.stringify({ type: 'error', message: e.message }));
+        ws.send(JSON.stringify({
+          type: 'error',
+          message: e.message,
+          code: e.code || undefined,
+        }));
       }
       return;
     }

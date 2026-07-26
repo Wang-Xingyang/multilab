@@ -353,12 +353,15 @@ gcc-ubuntu24-docker
 Current kernel/runtime APIs:
 
 ```text
-GET /api/kernels
-GET /api/kernels/resolve?tutorial=<id>
-GET /api/runtime
+GET  /api/kernels
+GET  /api/kernels/resolve?tutorial=<id>
+GET  /api/runtime
+POST /api/runtime/select { tutorial, kernel_id }
 ```
 
-The resolver currently checks required platform, capabilities, command names, and simple command version constraints such as `>=13`, then prefers `recommended_kernel`. It returns `version_mismatches` for incompatible command versions and a `runtime` plan describing the provider/network/sandbox binding. Complex semver ranges and dynamic `kernels.json` loading are still not implemented. User-facing kernel switching UI is not implemented yet.
+The resolver currently checks required platform, capabilities, command names, and simple command version constraints such as `>=13`, then prefers a per-package user selection (stored in `.multilab-state/kernel-selection.json`) and otherwise `recommended_kernel`. It returns `version_mismatches` for incompatible command versions and a `runtime` plan describing the provider/network/sandbox binding.
+
+The UI shows a kernel selector for compatible candidates and a "重连终端" button. Selecting a kernel persists the preference, applies it through `RuntimeManager`, and reconnects the WebSocket terminal. If an interactive command hits `runtime_replaced`, the frontend auto-reconnects. Complex semver ranges and dynamic `kernels.json` loading are still not implemented.
 
 ## Known Limitations
 
@@ -366,7 +369,7 @@ The resolver currently checks required platform, capabilities, command names, an
 - `.mlab` pack/unpack CLI, host-path import, and browser upload/open are implemented.
 - `.mlab-save` host-path export/import and browser upload/download are implemented.
 - Kernel registry is static and only contains the default Docker kernel.
-- Runtime selection is automatic from the resolved kernel; there is no user kernel picker yet.
+- Runtime selection follows resolved kernel plus optional per-package user preference; only one Docker kernel is registered today.
 - Package library management covers list/detail/open/delete; bulk cleanup and save-linked cleanup are not implemented.
 - Panel declarations are present in manifests but not fully rendered dynamically.
 - The Docker container is single-session and not suitable for multi-user deployment.

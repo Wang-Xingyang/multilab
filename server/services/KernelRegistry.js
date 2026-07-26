@@ -7,7 +7,7 @@ export class KernelRegistry {
     return this.kernels.map(kernel => ({ ...kernel }));
   }
 
-  resolveForPackage(pkg) {
+  resolveForPackage(pkg, { preferredKernelId = null } = {}) {
     const requirements = pkg.runtime_requirements || {};
     const candidates = this.kernels
       .map(kernel => ({
@@ -17,12 +17,18 @@ export class KernelRegistry {
       }))
       .sort((a, b) => Number(b.recommended) - Number(a.recommended));
 
-    const selected = candidates.find(candidate => candidate.recommended && candidate.match.ok)
+    const preferred = preferredKernelId
+      ? candidates.find(candidate => candidate.kernel.id === preferredKernelId && candidate.match.ok)
+      : null;
+    const selected = preferred
+      || candidates.find(candidate => candidate.recommended && candidate.match.ok)
       || candidates.find(candidate => candidate.match.ok)
       || null;
 
     return {
       selected: selected ? selected.kernel : null,
+      preferred_kernel_id: preferredKernelId || null,
+      preferred_applied: Boolean(preferred),
       candidates: candidates.map(candidate => ({
         ...candidate.kernel,
         recommended: candidate.recommended,

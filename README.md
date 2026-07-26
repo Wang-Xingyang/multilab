@@ -15,7 +15,7 @@ This repository is an early prototype of the MultiLab host:
 - package sources: development directories under `TUTORIALS_DIR` and imported packages under `.multilab-state/packages/`;
 - command model: manifest-declared `commands[]` with script files;
 - security: digest-keyed trust store (default `untrusted`) and command-time security policy gates;
-- kernels/runtime: static `KernelRegistry` with `gcc-ubuntu24-docker`; `RuntimeManager` binds the selected kernel to a provider and applies Docker network/sandbox settings;
+- kernels/runtime: static `KernelRegistry` with `gcc-ubuntu24-docker`; `RuntimeManager` binds the selected kernel to a provider and applies Docker network/sandbox settings; UI can pick a compatible kernel and reconnect the terminal;
 - saves: versioned step files plus `save.json` progress metadata under `.multilab-state/saves/`.
 
 The long-term product direction is documented in:

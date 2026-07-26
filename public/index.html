@@ -262,6 +262,10 @@
   <button id="import-package-btn" title="从本机选择并打开 .mlab">打开 .mlab</button>
   <button id="export-save-btn" title="下载当前进度为 .mlab-save" disabled>导出进度</button>
   <button id="import-save-btn" title="从本机选择并导入 .mlab-save">导入进度</button>
+  <select id="kernel-select" title="当前教程可用 kernel" disabled>
+    <option value="">kernel…</option>
+  </select>
+  <button id="reconnect-btn" title="重连终端到当前 runtime" disabled>重连终端</button>
   <button id="trust-btn" title="当前 package trust 状态" disabled>未加载</button>
   <input id="import-package-file" type="file" accept=".mlab,application/zip" hidden>
   <input id="import-save-file" type="file" accept=".mlab-save,application/zip" hidden>
@@ -411,11 +415,13 @@ function status(msg) {
 function renderTrustButton() {
   const btn = document.getElementById('trust-btn');
   const exportBtn = document.getElementById('export-save-btn');
+  const reconnectBtn = document.getElementById('reconnect-btn');
   if (!currentTutorial?.package_digest) {
     btn.textContent = '未加载';
     btn.title = '当前 package trust 状态';
     btn.disabled = true;
     exportBtn.disabled = true;
+    reconnectBtn.disabled = true;
     return;
   }
   const trust = currentTutorial.trust || 'untrusted';
@@ -424,6 +430,68 @@ function renderTrustButton() {
   btn.title = `${currentTutorial.trust_default ? '默认' : '用户设置'} trust: ${trust}`;
   btn.disabled = false;
   exportBtn.disabled = false;
+  reconnectBtn.disabled = false;
+}
+
+function renderKernelSelect(resolution) {
+  const sel = document.getElementById('kernel-select');
+  if (!resolution?.selected && !resolution?.candidates?.length) {
+    sel.innerHTML = '<option value="">无可用 kernel</option>';
+    sel.disabled = true;
+    return;
+  }
+  const candidates = (resolution.candidates || []).filter(k => k.compatible);
+  const selectedId = resolution.selected?.id || '';
+  sel.innerHTML = candidates.map(k => {
+    const label = `${k.display_name || k.id}${k.recommended ? ' ★' : ''}`;
+    return `<option value="${escapeAttr(k.id)}" ${k.id === selectedId ? 'selected' : ''}>${escapeAttr(label)}</option>`;
+  }).join('') || '<option value="">无兼容 kernel</option>';
+  sel.disabled = candidates.length === 0;
+  sel.title = resolution.runtime
+    ? `${resolution.selected?.id || ''} · ${resolution.runtime.network_mode || '?'} · ${resolution.runtime.sandbox_preset || '?'}`
+    : '当前教程可用 kernel';
+  currentTutorial._kernelResolution = resolution;
+}
+
+async function refreshKernelResolution() {
+  if (!currentTutorial) {
+    renderKernelSelect(null);
+    return;
+  }
+  try {
+    const res = await fetch(`/api/kernels/resolve?tutorial=${encodeURIComponent(currentTutorialKey())}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const resolution = await res.json();
+    renderKernelSelect(resolution);
+  } catch (e) {
+    console.error('[MultiLab] kernel resolve failed:', e);
+    renderKernelSelect(null);
+  }
+}
+
+async function selectKernelFromUi() {
+  if (!currentTutorial) return;
+  const sel = document.getElementById('kernel-select');
+  const kernelId = sel.value;
+  if (!kernelId) return;
+  try {
+    status('切换 kernel...');
+    const result = await apiJson('/api/runtime/select', {
+      tutorial: currentTutorialKey(),
+      kernel_id: kernelId,
+    });
+    renderKernelSelect({
+      selected: result.kernel,
+      candidates: result.candidates,
+      runtime: result.runtime,
+      preferred_applied: result.preferred_applied,
+    });
+    reconnectWS({ reason: result.kernel.id });
+    toast(result.replaced ? `已切换到 ${result.kernel.id}` : `已应用 ${result.kernel.id}`);
+  } catch (e) {
+    toast('切换 kernel 失败: ' + e.message, true);
+    await refreshKernelResolution();
+  }
 }
 
 async function toggleCurrentPackageTrust() {
@@ -562,7 +630,15 @@ term.onData((data) => {
 });
 
 // ========== WebSocket ==========
+let _wsForceClose = false;
+let _wsReconnectTimer = null;
+
 function connectWS() {
+  _wsForceClose = false;
+  if (_wsReconnectTimer) {
+    clearTimeout(_wsReconnectTimer);
+    _wsReconnectTimer = null;
+  }
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onopen = () => status('已连接');
@@ -571,9 +647,37 @@ function connectWS() {
     if (msg.type === 'output') term.write(msg.data);
     else if (msg.type === 'exit') term.write(`\r\n\x1b[90m[进程退出, code=${msg.code}]\x1b[0m\r\n`);
     else if (msg.type === 'status') status(msg.message);
-    else if (msg.type === 'error') { toast(msg.message, true); term.write(`\r\n\x1b[31m[错误] ${msg.message}\x1b[0m\r\n`); }
+    else if (msg.type === 'ready') status('终端就绪');
+    else if (msg.type === 'error') {
+      if (msg.code === 'runtime_replaced') {
+        toast('Runtime 已切换，正在重连终端…');
+        reconnectWS({ reason: 'runtime replaced' });
+        return;
+      }
+      toast(msg.message, true);
+      term.write(`\r\n\x1b[31m[错误] ${msg.message}\x1b[0m\r\n`);
+    }
   };
-  ws.onclose = () => { status('连接断开,3 秒后重连'); setTimeout(connectWS, 3000); };
+  ws.onclose = () => {
+    if (_wsForceClose) return;
+    status('连接断开,3 秒后重连');
+    _wsReconnectTimer = setTimeout(connectWS, 3000);
+  };
+}
+
+function reconnectWS(opts = {}) {
+  _wsForceClose = true;
+  if (_wsReconnectTimer) {
+    clearTimeout(_wsReconnectTimer);
+    _wsReconnectTimer = null;
+  }
+  if (ws) {
+    try { ws.onclose = null; ws.close(); } catch {}
+  }
+  if (opts.reason) {
+    term.write(`\r\n\x1b[90m[终端重连: ${opts.reason}]\x1b[0m\r\n`);
+  }
+  connectWS();
 }
 connectWS();
 
@@ -898,6 +1002,7 @@ async function loadTutorial(id) {
     currentTutorial = await res.json();
     if (!currentTutorial || !currentTutorial.steps?.length) throw new Error('无效的教程数据');
     renderTrustButton();
+    await refreshKernelResolution();
     currentStep = 0;
     await enterStep(0, { skipSave: true });
   } catch (e) {
@@ -1133,6 +1238,11 @@ document.getElementById('file-picker-overlay').addEventListener('click', (e) => 
 });
 document.getElementById('picker-refresh-btn').addEventListener('click', () => loadFilePickerList(true));
 document.getElementById('tab-open-btn').addEventListener('click', openFilePicker);
+document.getElementById('kernel-select').addEventListener('change', selectKernelFromUi);
+document.getElementById('reconnect-btn').addEventListener('click', () => {
+  reconnectWS({ reason: 'manual' });
+  toast('正在重连终端');
+});
 document.getElementById('library-btn').addEventListener('click', openLibraryPanel);
 document.getElementById('library-refresh-btn').addEventListener('click', loadLibraryList);
 document.getElementById('library-overlay').addEventListener('click', (e) => {

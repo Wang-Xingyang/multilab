@@ -1,8 +1,9 @@
 export class RuntimeManager {
-  constructor({ providers = {}, kernelRegistry, packageService = null }) {
+  constructor({ providers = {}, kernelRegistry, packageService = null, kernelSelectionStore = null }) {
     this.providers = { ...providers };
     this.kernelRegistry = kernelRegistry;
     this.packageService = packageService;
+    this.kernelSelectionStore = kernelSelectionStore;
     this.activeKernel = null;
     this.activeSession = null;
     this.activeFingerprint = null;
@@ -65,7 +66,10 @@ export class RuntimeManager {
       version: cfg.version || '0.0.0',
       package_digest: packageDigest,
     };
-    const resolution = this.kernelRegistry.resolveForPackage(pkg);
+    const preferredKernelId = this.kernelSelectionStore
+      ? await this.kernelSelectionStore.getPreferredKernel(packageDigest)
+      : null;
+    const resolution = this.kernelRegistry.resolveForPackage(pkg, { preferredKernelId });
     if (!resolution.selected) {
       throw Object.assign(new Error('No compatible kernel found for this package'), {
         statusCode: 409,
@@ -73,6 +77,34 @@ export class RuntimeManager {
       });
     }
     return this.ensureForKernel(resolution.selected);
+  }
+
+  async selectKernelForTutorial(tutorialKey, kernelId) {
+    if (!this.packageService) {
+      throw new Error('RuntimeManager requires packageService to resolve tutorials');
+    }
+    const { cfg, packageDigest } = await this.packageService.loadTutorialConfig(tutorialKey);
+    const pkg = {
+      ...cfg,
+      version: cfg.version || '0.0.0',
+      package_digest: packageDigest,
+    };
+    const resolution = this.kernelRegistry.resolveForPackage(pkg, { preferredKernelId: kernelId });
+    if (!resolution.selected || resolution.selected.id !== kernelId) {
+      throw Object.assign(
+        new Error(`kernel is not compatible with this package: ${kernelId}`),
+        { statusCode: 409, code: 'kernel_incompatible' }
+      );
+    }
+    if (this.kernelSelectionStore) {
+      await this.kernelSelectionStore.setPreferredKernel(packageDigest, kernelId);
+    }
+    const ensured = await this.ensureForKernel(resolution.selected);
+    return {
+      ...ensured,
+      package_digest: packageDigest,
+      resolution,
+    };
   }
 
   async ensureForKernel(kernel) {

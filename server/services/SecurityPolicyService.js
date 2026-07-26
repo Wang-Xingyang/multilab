@@ -1,8 +1,9 @@
 export class SecurityPolicyService {
-  constructor({ packageService, trustStore, kernelRegistry }) {
+  constructor({ packageService, trustStore, kernelRegistry, kernelSelectionStore = null }) {
     this.packageService = packageService;
     this.trustStore = trustStore;
     this.kernelRegistry = kernelRegistry;
+    this.kernelSelectionStore = kernelSelectionStore;
   }
 
   async authorizeCommand({ tutorial }) {
@@ -14,7 +15,10 @@ export class SecurityPolicyService {
       package_digest: packageDigest,
     };
     const trust = await this.trustStore.getPackageTrust(packageDigest);
-    const resolution = this.kernelRegistry.resolveForPackage(pkg);
+    const preferredKernelId = this.kernelSelectionStore
+      ? await this.kernelSelectionStore.getPreferredKernel(packageDigest)
+      : null;
+    const resolution = this.kernelRegistry.resolveForPackage(pkg, { preferredKernelId });
     const selectedKernel = resolution.selected;
 
     if (!selectedKernel) {
