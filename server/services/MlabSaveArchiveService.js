@@ -1,3 +1,4 @@
+import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import fsp from 'fs/promises';
@@ -9,19 +10,30 @@ export class MlabSaveArchiveService {
     this.saveService = saveService;
   }
 
-  async exportArchive(tutorialKey, outputPath) {
-    if (!outputPath) {
-      throw Object.assign(new Error('path required'), { statusCode: 400 });
-    }
+  async exportArchive(tutorialKey, outputPath = null) {
     const bundle = await this.saveService.collectSaveBundle(tutorialKey);
-    const resolvedOutput = path.resolve(outputPath);
-    if (!resolvedOutput.endsWith('.mlab-save')) {
-      throw Object.assign(new Error('output path must end with .mlab-save'), { statusCode: 400 });
+    const packageId = bundle.package?.id || 'tutorial';
+    const version = bundle.package?.version || '0.0.0';
+    const defaultName = `${packageId}-${version}.mlab-save`;
+
+    let resolvedOutput;
+    let temporaryDir = null;
+    if (outputPath) {
+      resolvedOutput = path.resolve(outputPath);
+      if (!resolvedOutput.endsWith('.mlab-save')) {
+        throw Object.assign(new Error('output path must end with .mlab-save'), { statusCode: 400 });
+      }
+      await fsp.mkdir(path.dirname(resolvedOutput), { recursive: true });
+    } else {
+      temporaryDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'multilab-save-export-'));
+      resolvedOutput = path.join(temporaryDir, defaultName);
     }
-    await fsp.mkdir(path.dirname(resolvedOutput), { recursive: true });
+
     await writeZipArchive(resolvedOutput, bundle.files);
     return {
       path: resolvedOutput,
+      filename: path.basename(resolvedOutput),
+      temporary_dir: temporaryDir,
       source_key: bundle.source_key,
       package: bundle.package,
       progress: {

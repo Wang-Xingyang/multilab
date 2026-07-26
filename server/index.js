@@ -10,6 +10,7 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import http from 'http';
 import path from 'path';
+import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { DockerRuntimeProvider } from './runtime/DockerRuntimeProvider.js';
 import {
@@ -24,6 +25,7 @@ import { MlabArchiveService } from './services/MlabArchiveService.js';
 import { MlabSaveArchiveService } from './services/MlabSaveArchiveService.js';
 import { PackageLibrary } from './services/PackageLibrary.js';
 import { SecurityPolicyService } from './services/SecurityPolicyService.js';
+import { UPLOAD_LIMIT, withUploadedArchive } from './services/TempArchiveUpload.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -157,14 +159,52 @@ app.post('/api/packages/import', async (req, res) => {
   }
 });
 
+// Browser upload: raw .mlab body. Imports into the library and returns the package record.
+app.post(
+  '/api/packages/upload',
+  express.raw({ type: () => true, limit: UPLOAD_LIMIT }),
+  async (req, res) => {
+    try {
+      const filename = req.get('x-filename') || 'package.mlab';
+      const record = await withUploadedArchive(req.body, filename, '.mlab', async (tempPath, safeName) => (
+        packageLibrary.importArchive(tempPath, { source: `upload:${safeName}` })
+      ));
+      res.json(record);
+    } catch (e) {
+      res.status(e.statusCode || 500).json({ error: e.message });
+    }
+  }
+);
+
 app.post('/api/saves/export', async (req, res) => {
   try {
     const { tutorial, path: outputPath } = req.body;
-    if (!tutorial || !outputPath) {
-      return res.status(400).json({ error: 'tutorial and path required' });
-    }
+    if (!tutorial) return res.status(400).json({ error: 'tutorial required' });
+    if (!outputPath) return res.status(400).json({ error: 'path required; use /api/saves/download for browser download' });
     res.json(await saveArchiveService.exportArchive(tutorial, outputPath));
   } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message, code: e.code, package: e.package });
+  }
+});
+
+// Browser download: returns .mlab-save bytes for the current tutorial save.
+app.post('/api/saves/download', async (req, res) => {
+  let temporaryDir = null;
+  try {
+    const { tutorial } = req.body;
+    if (!tutorial) return res.status(400).json({ error: 'tutorial required' });
+    const exported = await saveArchiveService.exportArchive(tutorial, null);
+    temporaryDir = exported.temporary_dir;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${exported.filename}"`);
+    res.sendFile(exported.path, async err => {
+      if (temporaryDir) await fs.rm(temporaryDir, { recursive: true, force: true }).catch(() => {});
+      if (err && !res.headersSent) {
+        res.status(err.statusCode || 500).json({ error: err.message });
+      }
+    });
+  } catch (e) {
+    if (temporaryDir) await fs.rm(temporaryDir, { recursive: true, force: true }).catch(() => {});
     res.status(e.statusCode || 500).json({ error: e.message, code: e.code, package: e.package });
   }
 });
@@ -182,6 +222,27 @@ app.post('/api/saves/import', async (req, res) => {
     });
   }
 });
+
+// Browser upload: raw .mlab-save body.
+app.post(
+  '/api/saves/upload',
+  express.raw({ type: () => true, limit: UPLOAD_LIMIT }),
+  async (req, res) => {
+    try {
+      const filename = req.get('x-filename') || 'progress.mlab-save';
+      const result = await withUploadedArchive(req.body, filename, '.mlab-save', async tempPath => (
+        saveArchiveService.importArchive(tempPath)
+      ));
+      res.json(result);
+    } catch (e) {
+      res.status(e.statusCode || 500).json({
+        error: e.message,
+        code: e.code || undefined,
+        package: e.package || undefined,
+      });
+    }
+  }
+);
 
 function validateContainerPath(filePath) {
   const input = filePath.startsWith('/') ? filePath : path.posix.join(WORKSPACE_DIR, filePath);

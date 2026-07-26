@@ -131,7 +131,7 @@ Imported `.mlab` packages are unpacked under:
 .multilab-state/packages/<id>/<version>/<digest>/unpacked/
 ```
 
-They appear in `/api/tutorials` with a digest-derived `source_key` such as `pkg-<sha256hex>`. The UI can import a local `.mlab` path through `POST /api/packages/import`. Browser file upload is not implemented yet.
+They appear in `/api/tutorials` with a digest-derived `source_key` such as `pkg-<sha256hex>`. The UI "打开 .mlab" button uploads a browser-selected file to `POST /api/packages/upload`, imports it into the library, and opens it. Host-path import via `POST /api/packages/import` remains available for automation.
 
 Trust is keyed by package digest and defaults to `untrusted`. The UI can toggle `untrusted` / `user-trusted` through `/api/trust`. Command execution is gated by `SecurityPolicyService`: untrusted or sandbox-required packages need a sandbox-capable kernel, and network-disabled packages require a kernel with `network_default: none`.
 
@@ -142,14 +142,16 @@ Step saves are stored by package identity:
 .multilab-state/saves/<id>/<version>/<digest>/save.json
 ```
 
-`save.json` currently tracks `current_step`, `visited`, `test_passed`, and `updated_at`. Progress can be exported/imported as a `.mlab-save` archive through the UI or:
+`save.json` currently tracks `current_step`, `visited`, `test_passed`, and `updated_at`. Progress can be exported/imported as a `.mlab-save` archive:
 
 ```text
+POST /api/saves/download { tutorial }   # browser download
+POST /api/saves/upload                  # browser upload
 POST /api/saves/export { tutorial, path }
 POST /api/saves/import { path }
 ```
 
-Import matches package `id` / `version` / `digest`. If the package is missing, import returns `package_missing` and the original `.mlab` must be imported first.
+Import matches package `id` / `version` / `digest`. If the package is missing, import returns `package_missing` and the original `.mlab` must be opened/imported first.
 
 ## Checks
 

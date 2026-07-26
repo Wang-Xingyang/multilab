@@ -29,7 +29,7 @@ export class PackageLibrary {
     return records.sort((a, b) => `${a.id}@${a.version}`.localeCompare(`${b.id}@${b.version}`));
   }
 
-  async importArchive(packagePath) {
+  async importArchive(packagePath, opts = {}) {
     const inspected = await this.archiveService.inspectArchive(packagePath);
     const id = validateStorageSegment(inspected.id || 'unknown', 'package id');
     const version = validateStorageSegment(inspected.version || '0.0.0', 'package version');
@@ -43,13 +43,14 @@ export class PackageLibrary {
       await this.archiveService.unpackArchive(packagePath, unpackedDir);
     }
 
+    const source = opts.source || path.resolve(packagePath);
     const record = {
       id,
       version,
       digest: inspected.digest,
       package_format: 'mlab',
       imported_at: new Date().toISOString(),
-      source: path.resolve(packagePath),
+      source,
       files: inspected.files,
       unpacked_dir: unpackedDir,
     };

@@ -232,10 +232,12 @@
 <header>
   <div class="brand">Multi<span class="dot">·</span>Lab</div>
   <select id="tutorial-select"><option value="">加载中...</option></select>
-  <button id="import-package-btn" title="导入本机 .mlab 文件">导入 .mlab</button>
-  <button id="export-save-btn" title="导出当前进度为 .mlab-save" disabled>导出进度</button>
-  <button id="import-save-btn" title="导入本机 .mlab-save 进度">导入进度</button>
+  <button id="import-package-btn" title="从本机选择并打开 .mlab">打开 .mlab</button>
+  <button id="export-save-btn" title="下载当前进度为 .mlab-save" disabled>导出进度</button>
+  <button id="import-save-btn" title="从本机选择并导入 .mlab-save">导入进度</button>
   <button id="trust-btn" title="当前 package trust 状态" disabled>未加载</button>
+  <input id="import-package-file" type="file" accept=".mlab,application/zip" hidden>
+  <input id="import-save-file" type="file" accept=".mlab-save,application/zip" hidden>
   <div class="spacer"></div>
   <button id="theme-btn" title="切换主题">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
@@ -669,55 +671,94 @@ async function loadTutorialList(opts = {}) {
   }
 }
 
-async function importPackageFromPath() {
-  const packagePath = prompt('输入本机 .mlab 文件路径。后端会按此路径读取文件。', '');
-  if (!packagePath || !packagePath.trim()) return;
+function pickLocalFile(inputId) {
+  const input = document.getElementById(inputId);
+  input.value = '';
+  input.click();
+}
+
+async function uploadArchive(url, file) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'X-Filename': file.name,
+    },
+    body: file,
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(payload.error || `HTTP ${res.status}`);
+    err.code = payload.code;
+    err.package = payload.package;
+    throw err;
+  }
+  return payload;
+}
+
+async function openPackageFromFile(file) {
+  if (!file) return;
+  if (!/\.mlab$/i.test(file.name)) {
+    toast('请选择 .mlab 文件', true);
+    return;
+  }
   try {
-    status('导入 .mlab...');
-    const record = await apiJson('/api/packages/import', { path: packagePath.trim() });
+    status('打开 .mlab...');
+    const record = await uploadArchive('/api/packages/upload', file);
     await loadTutorialList({ preferredDigest: record.digest, preferredSourceType: 'installed' });
-    toast('已导入 .mlab');
+    toast('已打开 .mlab');
   } catch (e) {
-    toast('导入失败: ' + e.message, true);
+    toast('打开失败: ' + e.message, true);
   }
 }
 
-function defaultSaveExportPath() {
-  if (!currentTutorial) return '';
-  const id = currentTutorial.package_id || currentTutorial.id || 'tutorial';
-  const version = currentTutorial.version || '0.0.0';
-  return `/tmp/${id}-${version}.mlab-save`;
-}
-
-async function exportSaveFromPath() {
+async function exportSaveDownload() {
   if (!currentTutorial) return;
   const tutorialKey = currentTutorial.source_key || currentTutorial.id;
-  const outputPath = prompt('输入导出 .mlab-save 的本机路径。', defaultSaveExportPath());
-  if (!outputPath || !outputPath.trim()) return;
   try {
     await saveCurrentStep({ silent: true });
     status('导出进度...');
-    const result = await apiJson('/api/saves/export', {
-      tutorial: tutorialKey,
-      path: outputPath.trim(),
+    const res = await fetch('/api/saves/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tutorial: tutorialKey }),
     });
-    toast(`已导出进度: ${result.path}`);
+    if (!res.ok) {
+      const payload = await res.json().catch(() => ({}));
+      throw new Error(payload.error || `HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename="([^"]+)"/);
+    const filename = match?.[1] || `${currentTutorial.package_id || 'tutorial'}.mlab-save`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast('已下载进度包');
   } catch (e) {
     toast('导出进度失败: ' + e.message, true);
   }
 }
 
-async function importSaveFromPath() {
-  const archivePath = prompt('输入本机 .mlab-save 文件路径。后端会按此路径读取文件。', '');
-  if (!archivePath || !archivePath.trim()) return;
+async function importSaveFromFile(file) {
+  if (!file) return;
+  if (!/\.mlab-save$/i.test(file.name)) {
+    toast('请选择 .mlab-save 文件', true);
+    return;
+  }
   try {
     status('导入进度...');
-    const result = await apiJson('/api/saves/import', { path: archivePath.trim() });
+    const result = await uploadArchive('/api/saves/upload', file);
     await loadTutorialList({ preferredKey: result.source_key });
     toast('已导入进度');
   } catch (e) {
     if (e.code === 'package_missing' || /matching package not found/.test(e.message || '')) {
-      toast('缺少对应教程包，请先导入原 .mlab: ' + e.message, true);
+      toast('缺少对应教程包，请先打开原 .mlab: ' + e.message, true);
       return;
     }
     toast('导入进度失败: ' + e.message, true);
@@ -967,9 +1008,11 @@ document.getElementById('file-picker-overlay').addEventListener('click', (e) => 
 });
 document.getElementById('picker-refresh-btn').addEventListener('click', () => loadFilePickerList(true));
 document.getElementById('tab-open-btn').addEventListener('click', openFilePicker);
-document.getElementById('import-package-btn').addEventListener('click', importPackageFromPath);
-document.getElementById('export-save-btn').addEventListener('click', exportSaveFromPath);
-document.getElementById('import-save-btn').addEventListener('click', importSaveFromPath);
+document.getElementById('import-package-btn').addEventListener('click', () => pickLocalFile('import-package-file'));
+document.getElementById('import-package-file').addEventListener('change', (e) => openPackageFromFile(e.target.files?.[0]));
+document.getElementById('export-save-btn').addEventListener('click', exportSaveDownload);
+document.getElementById('import-save-btn').addEventListener('click', () => pickLocalFile('import-save-file'));
+document.getElementById('import-save-file').addEventListener('change', (e) => importSaveFromFile(e.target.files?.[0]));
 document.getElementById('trust-btn').addEventListener('click', toggleCurrentPackageTrust);
 document.getElementById('save-btn').addEventListener('click', saveFile);
 document.getElementById('revert-btn').addEventListener('click', resetCurrentStep);

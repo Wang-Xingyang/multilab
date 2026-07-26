@@ -124,7 +124,14 @@ Imported packages are unpacked under:
 .multilab-state/packages/<id>/<version>/<digest>/unpacked/
 ```
 
-`package.lock.json` records id, version, digest, source path, import time, file count, and unpacked directory. The current app-level import flow accepts a local file path through the browser UI and calls `POST /api/packages/import`. Browser file upload and direct open-from-archive are not implemented yet.
+`package.lock.json` records id, version, digest, source path, import time, file count, and unpacked directory. App-level package import supports two entry points:
+
+```text
+POST /api/packages/import { path }          # host-local path (API/dev)
+POST /api/packages/upload                  # browser raw .mlab body + X-Filename
+```
+
+The UI "打开 .mlab" button uses browser file picker upload, imports into the package library, then opens the installed source by digest. Host-path import remains available for API/automation.
 
 Imported packages are now included in `/api/tutorials` alongside development tutorials and can be opened by the player through their `source_key`.
 
@@ -261,7 +268,18 @@ save.json
 steps/<step-id>/files/<file>
 ```
 
-The archive references package `id` / `version` / `digest` and does not embed the tutorial package. Import requires a matching development or installed package source; if none exists, the API returns `code: "package_missing"` and asks the user to import the original `.mlab` first. The current UI accepts local host paths for export/import, matching the `.mlab` import prototype.
+The archive references package `id` / `version` / `digest` and does not embed the tutorial package. Import requires a matching development or installed package source; if none exists, the API returns `code: "package_missing"` and asks the user to open/import the original `.mlab` first.
+
+Save archive browser APIs:
+
+```text
+POST /api/saves/download { tutorial }      # browser download of .mlab-save
+POST /api/saves/upload                     # browser raw .mlab-save body + X-Filename
+POST /api/saves/export { tutorial, path }  # host-local path export
+POST /api/saves/import { path }            # host-local path import
+```
+
+The UI uses file picker upload for import and browser download for export. Host-path APIs remain for automation.
 
 The final product storage root is documented in the root spec:
 
@@ -334,8 +352,8 @@ The resolver currently checks required platform, capabilities, command names, an
 ## Known Limitations
 
 - Docker is still the only implemented provider.
-- `.mlab` pack/unpack CLI and local path import API are implemented; browser upload/open-from-archive is not implemented.
-- `.mlab-save` export/import is implemented for local host paths; browser upload/download is not implemented.
+- `.mlab` pack/unpack CLI, host-path import, and browser upload/open are implemented.
+- `.mlab-save` host-path export/import and browser upload/download are implemented.
 - Kernel registry is static and only contains the default Docker kernel.
 - Runtime provider selection is not yet driven by the selected kernel.
 - Panel declarations are present in manifests but not fully rendered dynamically.
