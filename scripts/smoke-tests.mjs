@@ -145,6 +145,36 @@ await test('Save archive export/import roundtrip', async () => {
   }
 });
 
+await test('SaveService.getProgress reads progress without overwriting current_step', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-smoke-'));
+  try {
+    const packageService = new PackageService({ tutorialsDir: TUTORIALS_DIR });
+    const saveService = new SaveService({
+      runtimeStateDir: path.join(tmp, 'state'),
+      runtimeSession: {
+        async ensureWorkspace() {},
+        async readFiles() { return []; },
+        async writeFiles() {},
+      },
+      packageService,
+    });
+    const cfg = await packageService.loadTutorial('hello-c');
+    // Fresh tutorial: getProgress must return defaults and NOT create save.json.
+    const fresh = await saveService.getProgress(cfg);
+    assert.equal(fresh.current_step, null);
+    assert.deepEqual(fresh.visited, []);
+    await assert.rejects(() => fs.access(saveService.saveMetadataPath(cfg)), (e) => e.code === 'ENOENT');
+    // After recording a visit on step 2, getProgress must return that current_step
+    // without being reset to step 0 by a probe.
+    await saveService.recordStepVisit(cfg, '02-args');
+    const after = await saveService.getProgress(cfg);
+    assert.equal(after.current_step, '02-args');
+    assert.ok(after.visited.includes('02-args'));
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 await test('KernelSelectionStore persists preference', async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-smoke-'));
   try {
