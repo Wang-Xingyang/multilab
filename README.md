@@ -8,7 +8,7 @@ It runs tutorial packages that declare a `multilab.json` manifest, provide real 
 
 This repository is an early prototype of the MultiLab host:
 
-- frontend: single-page `public/index.html` with Monaco Editor and xterm.js;
+- frontend: `public/index.html` shell plus no-bundler ES modules under `public/js/` (Monaco + xterm.js);
 - backend: Node ESM services behind `server/index.js` (Express + WebSocket);
 - runtime: `docker/os.Dockerfile` behind a `RuntimeProvider` abstraction;
 - package format: `multilab.json` directories and `.mlab` ZIP packages;
@@ -17,7 +17,7 @@ This repository is an early prototype of the MultiLab host:
 - security: digest-keyed trust store (default `untrusted`) and command-time security policy gates;
 - kernels/runtime: static `KernelRegistry` with offline `gcc-ubuntu24-docker` and networked `gcc-ubuntu24-docker-net` (localhost port publish); `RuntimeManager` binds the selected kernel to a provider and applies Docker network/sandbox/port settings; UI can pick a compatible kernel and reconnect the terminal;
 - saves: versioned step files plus `save.json` progress metadata under `.multilab-state/saves/`;
-- panels: manifest `default_panels` drive tutorial/terminal/file-tree visibility plus test-results/web-preview aux panels; live preview can iframe host-mapped `127.0.0.1` URLs when a net kernel publishes ports;
+- panels: manifest `default_panels` drive tutorial/terminal/file-tree visibility plus test-results/web-preview/logs/diagnostics aux panels; progress strip uses `save.json`; trust changes go through a confirmation dialog;
 - checks: `npm run test:smoke` runs a Docker-free service smoke suite.
 
 The long-term product direction is documented in:
@@ -135,7 +135,7 @@ Imported `.mlab` packages are unpacked under:
 
 They appear in `/api/tutorials` with a digest-derived `source_key` such as `pkg-<sha256hex>`. The UI "打开 .mlab" button uploads a browser-selected file to `POST /api/packages/upload`, imports it into the library, and opens it. The "教程库" panel lists installed packages (version/digest/source) and can open or delete them. Host-path import via `POST /api/packages/import` remains available for automation.
 
-Trust is keyed by package digest and defaults to `untrusted`. The UI can toggle `untrusted` / `user-trusted` through `/api/trust`. Command execution is gated by `SecurityPolicyService`: untrusted or sandbox-required packages need a sandbox-capable kernel, and network-disabled packages require a kernel with `network_default: none`.
+Trust is keyed by package digest and defaults to `untrusted`. The UI opens a confirmation dialog before changing `untrusted` / `user-trusted` through `/api/trust`. Command execution is gated by `SecurityPolicyService`: untrusted or sandbox-required packages need a sandbox-capable kernel, and network-disabled packages require a kernel with `network_default: none`.
 
 Step saves are stored by package identity:
 

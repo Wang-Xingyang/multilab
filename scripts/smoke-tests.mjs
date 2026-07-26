@@ -62,6 +62,8 @@ await test('PanelModel keeps hello-c test-results and file-tree panels', async (
   const result = normalizePanels(manifest.default_panels);
   assert.equal(result.has['test-results'], true);
   assert.equal(result.has['file-tree'], true);
+  assert.equal(result.has.logs, true);
+  assert.equal(result.has.diagnostics, true);
   const testPanel = result.panels.find(p => p.type === 'test-results');
   assert.ok(testPanel);
   assert.equal(testPanel.hidden, true);

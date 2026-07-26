@@ -42,6 +42,8 @@ export function normalizePanels(panels) {
       'test-results': hasVisibleOrDeclared(normalized, 'test-results'),
       'web-preview': hasVisibleOrDeclared(normalized, 'web-preview'),
       'file-tree': hasVisibleOrDeclared(normalized, 'file-tree'),
+      logs: hasVisibleOrDeclared(normalized, 'logs'),
+      diagnostics: hasVisibleOrDeclared(normalized, 'diagnostics'),
     },
   };
 }

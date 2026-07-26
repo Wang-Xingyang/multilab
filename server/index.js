@@ -143,6 +143,66 @@ app.get('/api/kernels', async (req, res) => {
   }
 });
 
+// Aggregate host-side diagnostics for the diagnostics panel (no Docker logs).
+app.get('/api/diagnostics', async (req, res) => {
+  try {
+    const tutorialId = req.query.tutorial;
+    if (!tutorialId) return res.status(400).json({ error: 'tutorial required' });
+    const tutorial = await packageService.loadTutorial(tutorialId);
+    const trust = await trustStore.getPackageTrust(tutorial.package_digest);
+    const preferredKernelId = await kernelSelectionStore.getPreferredKernel(tutorial.package_digest);
+    const resolution = kernelRegistry.resolveForPackage(tutorial, { preferredKernelId });
+    let runtimePlan = null;
+    if (resolution.selected) {
+      const provider = runtimeManager.getProviderForKernel(resolution.selected);
+      runtimePlan = provider.planKernelSession
+        ? provider.planKernelSession(resolution.selected)
+        : null;
+    }
+    let portMap = {};
+    let sessionReady = false;
+    try {
+      const session = runtimeManager.getSession();
+      sessionReady = Boolean(session);
+      portMap = typeof session.getPortMap === 'function' ? session.getPortMap() : {};
+    } catch {
+      sessionReady = false;
+    }
+    const active = runtimeManager.getActiveKernel();
+    res.json({
+      package: {
+        id: tutorial.id,
+        version: tutorial.version,
+        digest: tutorial.package_digest,
+        source_key: tutorial.source_key,
+        source_type: tutorial.source_type,
+        security: tutorial.security || {},
+      },
+      trust,
+      preferred_kernel_id: preferredKernelId,
+      resolution: {
+        selected: resolution.selected,
+        network_required: resolution.network_required,
+        candidates: resolution.candidates,
+        requirements: resolution.requirements,
+      },
+      runtime: {
+        provider: resolution.selected?.provider || null,
+        network_mode: runtimePlan?.networkMode || null,
+        sandbox_preset: runtimePlan?.sandboxPreset || null,
+        publish_ports: runtimePlan?.publishPorts || [],
+        image: runtimePlan?.image || resolution.selected?.image || null,
+        active_kernel_id: active?.id || null,
+        active_fingerprint: runtimeManager.activeFingerprint,
+        session_ready: sessionReady,
+        port_map: portMap,
+      },
+    });
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message });
+  }
+});
+
 app.get('/api/kernels/resolve', async (req, res) => {
   try {
     const tutorialId = req.query.tutorial;
