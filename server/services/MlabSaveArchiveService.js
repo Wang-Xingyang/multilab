@@ -1,7 +1,8 @@
 import path from 'path';
-import fs from 'fs/promises';
-import zlib from 'zlib';
+import fs from 'fs';
+import fsp from 'fs/promises';
 import yauzl from 'yauzl';
+import yazl from 'yazl';
 
 export class MlabSaveArchiveService {
   constructor({ saveService }) {
@@ -17,7 +18,7 @@ export class MlabSaveArchiveService {
     if (!resolvedOutput.endsWith('.mlab-save')) {
       throw Object.assign(new Error('output path must end with .mlab-save'), { statusCode: 400 });
     }
-    await fs.mkdir(path.dirname(resolvedOutput), { recursive: true });
+    await fsp.mkdir(path.dirname(resolvedOutput), { recursive: true });
     await writeZipArchive(resolvedOutput, bundle.files);
     return {
       path: resolvedOutput,
@@ -128,73 +129,17 @@ async function writeZipArchive(outputPath, files) {
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  const localParts = [];
-  const centralParts = [];
-  let offset = 0;
-
+  const zipFile = new yazl.ZipFile();
   for (const entry of entries) {
-    const nameBuf = Buffer.from(entry.name, 'utf8');
-    const compressed = zlib.deflateRawSync(entry.content);
-    const crc = crc32(entry.content);
-    const localHeader = Buffer.alloc(30);
-    localHeader.writeUInt32LE(0x04034b50, 0);
-    localHeader.writeUInt16LE(20, 4);
-    localHeader.writeUInt16LE(0, 6);
-    localHeader.writeUInt16LE(8, 8); // deflate
-    localHeader.writeUInt16LE(0, 10);
-    localHeader.writeUInt16LE(0, 12);
-    localHeader.writeUInt32LE(crc >>> 0, 14);
-    localHeader.writeUInt32LE(compressed.length, 18);
-    localHeader.writeUInt32LE(entry.content.length, 22);
-    localHeader.writeUInt16LE(nameBuf.length, 26);
-    localHeader.writeUInt16LE(0, 28);
-
-    localParts.push(localHeader, nameBuf, compressed);
-
-    const centralHeader = Buffer.alloc(46);
-    centralHeader.writeUInt32LE(0x02014b50, 0);
-    centralHeader.writeUInt16LE(20, 4);
-    centralHeader.writeUInt16LE(20, 6);
-    centralHeader.writeUInt16LE(0, 8);
-    centralHeader.writeUInt16LE(8, 10);
-    centralHeader.writeUInt16LE(0, 12);
-    centralHeader.writeUInt16LE(0, 14);
-    centralHeader.writeUInt32LE(crc >>> 0, 16);
-    centralHeader.writeUInt32LE(compressed.length, 20);
-    centralHeader.writeUInt32LE(entry.content.length, 24);
-    centralHeader.writeUInt16LE(nameBuf.length, 28);
-    centralHeader.writeUInt16LE(0, 30);
-    centralHeader.writeUInt16LE(0, 32);
-    centralHeader.writeUInt16LE(0, 34);
-    centralHeader.writeUInt16LE(0, 36);
-    centralHeader.writeUInt32LE(0, 38);
-    centralHeader.writeUInt32LE(offset, 42);
-    centralParts.push(centralHeader, nameBuf);
-
-    offset += localHeader.length + nameBuf.length + compressed.length;
+    zipFile.addBuffer(entry.content, entry.name);
   }
 
-  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
-  const end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(0, 4);
-  end.writeUInt16LE(0, 6);
-  end.writeUInt16LE(entries.length, 8);
-  end.writeUInt16LE(entries.length, 10);
-  end.writeUInt32LE(centralSize, 12);
-  end.writeUInt32LE(offset, 16);
-  end.writeUInt16LE(0, 20);
-
-  await fs.writeFile(outputPath, Buffer.concat([...localParts, ...centralParts, end]));
-}
-
-function crc32(buf) {
-  let crc = 0xffffffff;
-  for (let i = 0; i < buf.length; i++) {
-    crc ^= buf[i];
-    for (let j = 0; j < 8; j++) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-    }
-  }
-  return (crc ^ 0xffffffff) >>> 0;
+  await new Promise((resolve, reject) => {
+    const output = fs.createWriteStream(outputPath);
+    output.on('close', resolve);
+    output.on('error', reject);
+    zipFile.outputStream.on('error', reject);
+    zipFile.outputStream.pipe(output);
+    zipFile.end();
+  });
 }
