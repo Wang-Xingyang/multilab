@@ -181,6 +181,43 @@
   }
   #terminal { height: 100%; }
 
+  /* === 右侧辅助面板: test-results / web-preview === */
+  .aux-panel {
+    width: 320px; flex-shrink: 0; display: none; flex-direction: column;
+    background: var(--bg-panel); border-left: none; min-width: 220px;
+  }
+  .aux-panel.visible { display: flex; }
+  .aux-tabs {
+    height: 32px; display: flex; align-items: stretch; border-bottom: 1px solid var(--border);
+    padding: 0 4px; gap: 0;
+  }
+  .aux-tabs button {
+    background: transparent; border: none; border-bottom: 2px solid transparent;
+    color: var(--text-dim); padding: 0 10px; font-size: 12px;
+  }
+  .aux-tabs button:hover { color: var(--text); }
+  .aux-tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+  .aux-tabs .aux-close {
+    margin-left: auto; color: var(--text-dim); padding: 0 8px; font-size: 14px;
+  }
+  .aux-body { flex: 1; overflow: auto; padding: 12px; font-size: 12px; }
+  .aux-pane { display: none; height: 100%; }
+  .aux-pane.active { display: block; }
+  .test-result-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 3px; font-weight: 600; margin-bottom: 8px;
+  }
+  .test-result-badge.pass { background: rgba(78,201,176,0.15); color: var(--success); }
+  .test-result-badge.fail { background: rgba(244,135,113,0.15); color: var(--error); }
+  .test-result-output, .preview-output {
+    white-space: pre-wrap; word-break: break-word; font-family: "JetBrains Mono","Consolas",monospace;
+    color: var(--text); line-height: 1.5;
+  }
+  .preview-frame {
+    width: 100%; height: calc(100% - 8px); min-height: 240px; border: 1px solid var(--border);
+    border-radius: 4px; background: #fff;
+  }
+  .aux-empty { color: var(--text-dim); padding: 16px 0; }
+
   /* === 状态条 === */
   .status-bar {
     position: fixed; bottom: 0; right: 0; padding: 3px 10px; background: var(--accent);
@@ -288,6 +325,9 @@
   <button id="test-btn" title="检查当前 step">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20,6 9,17 4,12"/></svg>
   </button>
+  <button id="preview-btn" title="预览" style="display:none">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+  </button>
   <button id="export-btn" title="导出工作区">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
   </button>
@@ -317,6 +357,22 @@
       <div id="terminal"></div>
     </div>
   </section>
+  <div class="drag-handle-v" id="drag-v-aux" style="display:none"></div>
+  <aside class="aux-panel" id="aux-panel">
+    <div class="aux-tabs">
+      <button type="button" data-aux-tab="test-results" class="active">检查结果</button>
+      <button type="button" data-aux-tab="web-preview">Preview</button>
+      <button type="button" class="aux-close" id="aux-close-btn" title="关闭面板">×</button>
+    </div>
+    <div class="aux-body">
+      <div class="aux-pane active" id="pane-test-results">
+        <div class="aux-empty">运行检查后，结果会显示在这里。</div>
+      </div>
+      <div class="aux-pane" id="pane-web-preview">
+        <div class="aux-empty">运行预览命令后，内容会显示在这里。</div>
+      </div>
+    </div>
+  </aside>
 </main>
 
 <div class="status-bar" id="status-bar"></div>
@@ -685,6 +741,13 @@ connectWS();
 let _stepLoadSeq = 0;
 let _fileListCache = null;
 let _fileListFetching = false;
+let _auxVisible = false;
+let _activeAuxTab = 'test-results';
+const FALLBACK_PANELS = [
+  { id: 'tutorial', type: 'tutorial', area: 'left' },
+  { id: 'editor', type: 'editor', area: 'center' },
+  { id: 'terminal', type: 'terminal', area: 'bottom' },
+];
 
 function currentStepObj() {
   return currentTutorial?.steps?.[currentStep] || null;
@@ -696,6 +759,130 @@ function currentTutorialKey() {
 
 function stepCommand(step, type) {
   return (step?.commands || []).find(cmd => (cmd.type === type || cmd.id === type) && cmd.available !== false) || null;
+}
+
+function getPanelDecls() {
+  if (Array.isArray(currentTutorial?.ui_panels?.panels) && currentTutorial.ui_panels.panels.length) {
+    return currentTutorial.ui_panels.panels;
+  }
+  const panels = currentTutorial?.default_panels;
+  return Array.isArray(panels) && panels.length ? panels : FALLBACK_PANELS;
+}
+
+function panelDecl(type) {
+  return getPanelDecls().find(panel => panel.type === type) || null;
+}
+
+function panelDeclared(type) {
+  return Boolean(panelDecl(type));
+}
+
+function applyPanelLayout() {
+  const tutorial = panelDecl('tutorial');
+  const terminal = panelDecl('terminal');
+  const testResults = panelDecl('test-results');
+  const preview = panelDecl('web-preview');
+
+  const showTutorial = Boolean(tutorial && !tutorial.hidden);
+  const showTerminal = !terminal || !terminal.hidden;
+  const canShowAux = panelDeclared('test-results') || panelDeclared('web-preview');
+  const showAux = canShowAux && (_auxVisible
+    || (testResults && !testResults.hidden)
+    || (preview && !preview.hidden));
+
+  document.getElementById('tutorial-panel').style.display = showTutorial ? '' : 'none';
+  document.getElementById('drag-v').style.display = showTutorial ? '' : 'none';
+  document.getElementById('terminal-wrap').style.display = showTerminal ? '' : 'none';
+  document.getElementById('drag-h').style.display = showTerminal ? '' : 'none';
+
+  const aux = document.getElementById('aux-panel');
+  const dragAux = document.getElementById('drag-v-aux');
+  aux.classList.toggle('visible', showAux);
+  dragAux.style.display = showAux ? '' : 'none';
+
+  const testTab = aux.querySelector('[data-aux-tab="test-results"]');
+  const previewTab = aux.querySelector('[data-aux-tab="web-preview"]');
+  testTab.style.display = panelDeclared('test-results') ? '' : 'none';
+  previewTab.style.display = panelDeclared('web-preview') ? '' : 'none';
+
+  if (showAux) {
+    if (_activeAuxTab === 'test-results' && !panelDeclared('test-results')) _activeAuxTab = 'web-preview';
+    if (_activeAuxTab === 'web-preview' && !panelDeclared('web-preview')) _activeAuxTab = 'test-results';
+    setAuxTab(_activeAuxTab);
+  }
+}
+
+function setAuxTab(tab) {
+  _activeAuxTab = tab;
+  document.querySelectorAll('#aux-panel [data-aux-tab]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.auxTab === tab);
+  });
+  document.querySelectorAll('#aux-panel .aux-pane').forEach(pane => {
+    pane.classList.toggle('active', pane.id === `pane-${tab}`);
+  });
+}
+
+function revealAuxPanel(tab) {
+  if (tab === 'test-results' && !panelDeclared('test-results')) return;
+  if (tab === 'web-preview' && !panelDeclared('web-preview')) return;
+  _auxVisible = true;
+  _activeAuxTab = tab;
+  applyPanelLayout();
+}
+
+function showTestResults(result) {
+  const pane = document.getElementById('pane-test-results');
+  const passed = Boolean(result?.passed);
+  const output = result?.output || '';
+  pane.innerHTML = `
+    <div class="test-result-badge ${passed ? 'pass' : 'fail'}">${passed ? 'PASS' : 'FAIL'}</div>
+    <div class="test-result-output"></div>
+  `;
+  pane.querySelector('.test-result-output').textContent = output || '(no output)';
+  if (panelDeclared('test-results')) revealAuxPanel('test-results');
+}
+
+function renderPreviewFrame(pane, html) {
+  pane.innerHTML = '';
+  const iframe = document.createElement('iframe');
+  iframe.className = 'preview-frame';
+  iframe.setAttribute('sandbox', 'allow-scripts');
+  iframe.srcdoc = html;
+  pane.appendChild(iframe);
+}
+
+function showPreviewContent(result) {
+  const pane = document.getElementById('pane-web-preview');
+  const output = String(result?.output || '');
+  const htmlMatch = output.match(/MULTILAB_PREVIEW_HTML\s*\n([\s\S]*)$/);
+  const urlMatch = output.match(/MULTILAB_PREVIEW_URL=(https?:\/\/\S+)/);
+  if (htmlMatch) {
+    renderPreviewFrame(pane, htmlMatch[1].trim());
+  } else if (urlMatch) {
+    // Local-first prototype: show URL text only; host port mapping is not implemented yet.
+    pane.innerHTML = '';
+    const note = document.createElement('div');
+    note.className = 'aux-empty';
+    note.textContent = 'Preview URL（当前未做端口映射，仅展示输出）:';
+    const url = document.createElement('div');
+    url.className = 'preview-output';
+    url.textContent = urlMatch[1];
+    const raw = document.createElement('div');
+    raw.className = 'preview-output';
+    raw.style.marginTop = '12px';
+    raw.style.color = 'var(--text-dim)';
+    raw.textContent = output;
+    pane.append(note, url, raw);
+  } else if (/<[a-z][\s\S]*>/i.test(output)) {
+    renderPreviewFrame(pane, output);
+  } else {
+    pane.innerHTML = '';
+    const pre = document.createElement('div');
+    pre.className = 'preview-output';
+    pre.textContent = output || '(empty preview output)';
+    pane.appendChild(pre);
+  }
+  if (panelDeclared('web-preview')) revealAuxPanel('web-preview');
 }
 
 function escapeAttr(value) {
@@ -752,6 +939,7 @@ function renderTutorialStepText() {
   document.getElementById('prev-step').disabled = currentStep === 0;
   document.getElementById('next-step').disabled = currentStep === currentTutorial.steps.length - 1;
   document.getElementById('test-btn').style.display = stepCommand(step, 'test') ? '' : 'none';
+  document.getElementById('preview-btn').style.display = stepCommand(step, 'preview') ? '' : 'none';
 }
 
 async function apiJson(url, body) {
@@ -1001,6 +1189,8 @@ async function loadTutorial(id) {
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => '')}`);
     currentTutorial = await res.json();
     if (!currentTutorial || !currentTutorial.steps?.length) throw new Error('无效的教程数据');
+    _auxVisible = false;
+    applyPanelLayout();
     renderTrustButton();
     await refreshKernelResolution();
     currentStep = 0;
@@ -1336,11 +1526,63 @@ async function runTest() {
     });
     const color = res.passed ? '\x1b[32m' : '\x1b[31m';
     term.write(`\r\n${color}[${res.passed ? 'PASS' : 'FAIL'}]\x1b[0m\r\n${res.output || ''}\r\n`);
+    showTestResults(res);
     toast(res.passed ? '检查通过' : '检查未通过', !res.passed);
   } catch (e) {
     toast('检查失败: ' + e.message, true);
   }
 }
+
+async function runPreview() {
+  const step = currentStepObj();
+  const command = stepCommand(step, 'preview');
+  if (!currentTutorial || !command) return;
+  try {
+    await saveCurrentStep({ silent: true });
+    if (command.terminal === 'interactive') {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        toast('WebSocket 未连接', true);
+        return;
+      }
+      ws.send(JSON.stringify({
+        type: 'command',
+        tutorial: currentTutorialKey(),
+        step: step.id,
+        command: command.id || command.type,
+      }));
+      if (panelDeclared('web-preview')) {
+        document.getElementById('pane-web-preview').innerHTML =
+          '<div class="aux-empty">已在终端启动预览命令。若脚本输出 MULTILAB_PREVIEW_HTML / MULTILAB_PREVIEW_URL，请改用 captured preview。</div>';
+        revealAuxPanel('web-preview');
+      }
+      toast('已启动预览命令');
+      return;
+    }
+    status('预览中...');
+    const res = await apiJson('/api/commands/run', {
+      tutorial: currentTutorialKey(),
+      step: step.id,
+      command: command.id || command.type,
+    });
+    showPreviewContent(res);
+    toast(res.passed === false ? '预览命令失败' : '预览已更新', res.passed === false);
+  } catch (e) {
+    toast('预览失败: ' + e.message, true);
+  }
+}
+
+document.getElementById('preview-btn').addEventListener('click', runPreview);
+document.getElementById('aux-close-btn').addEventListener('click', () => {
+  _auxVisible = false;
+  applyPanelLayout();
+});
+document.querySelectorAll('#aux-panel [data-aux-tab]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    setAuxTab(btn.dataset.auxTab);
+    _auxVisible = true;
+    applyPanelLayout();
+  });
+});
 </script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs/promises';
+import { normalizePanels } from './PanelModel.js';
 
 export const LANG_BY_EXT = {
   '.c': 'c', '.h': 'c', '.cpp': 'cpp', '.cc': 'cpp', '.hpp': 'cpp',
@@ -206,6 +207,7 @@ export class PackageService {
     cfg.package_digest = packageDigest;
     cfg.schema_version = cfg.schema_version || 0;
     cfg.version = cfg.version || '0.0.0';
+    cfg.ui_panels = normalizePanels(cfg.default_panels);
 
     for (const step of cfg.steps || []) {
       validateSafePath(step.id);

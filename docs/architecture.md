@@ -32,12 +32,14 @@ Browser UI
   Monaco editor
   xterm.js terminal
   tutorial Markdown
+  dynamic aux panels (test-results / web-preview)
 
 Node host
   Express APIs
   WebSocket terminal bridge
   PackageService
   PackageLibrary
+  PanelModel
   SaveService
   MlabSaveArchiveService
   CommandService
@@ -196,6 +198,18 @@ User clicks Check
 ```
 
 The old `/api/test` and WebSocket `type: "run"` paths have been removed.
+
+## Panels And Preview
+
+`PackageService` normalizes `default_panels` into `ui_panels` through `PanelModel`. Unknown panel types are dropped so packages cannot inject arbitrary host UI.
+
+Current UI behavior:
+
+- `tutorial` / `terminal` visibility follows the normalized panel list;
+- `test-results` opens a right-hand aux panel when a captured test/check runs (even if the panel starts `hidden`);
+- `web-preview` opens the same aux area for `type: "preview"` commands;
+- captured preview output may include `MULTILAB_PREVIEW_HTML` or HTML body for sandboxed `iframe.srcdoc` rendering;
+- `MULTILAB_PREVIEW_URL=...` is displayed as text for now because Docker port mapping is not implemented under the default network-disabled kernel.
 
 ## Terminal Model
 
@@ -371,5 +385,5 @@ The UI shows a kernel selector for compatible candidates and a "重连终端" bu
 - Kernel registry is static and only contains the default Docker kernel.
 - Runtime selection follows resolved kernel plus optional per-package user preference; only one Docker kernel is registered today.
 - Package library management covers list/detail/open/delete; bulk cleanup and save-linked cleanup are not implemented.
-- Panel declarations are present in manifests but not fully rendered dynamically.
-- The Docker container is single-session and not suitable for multi-user deployment.
+- Panel declarations drive tutorial/terminal visibility and a right-hand aux panel for `test-results` / `web-preview`. Full file-tree/logs/diagnostics panels and Docker port-mapped live web preview are not implemented yet.
+- The Docker container is single-session and intended for local single-user use.
