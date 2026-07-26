@@ -167,6 +167,12 @@ export class SaveService {
     });
   }
 
+  // 读取进度 metadata,不写回 (不记录 visit, 不覆盖 current_step)。
+  // 用于 tutorial detail 让前端 resume, 避免探测 step 0 时把 current_step 覆盖成 0。
+  async getProgress(cfg) {
+    return this.readSaveMetadata(cfg);
+  }
+
   async recordTestResult(tutorialId, stepId, passed) {
     validateSafePath(tutorialId);
     validateSafePath(stepId);

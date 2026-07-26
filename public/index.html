@@ -6,16 +6,16 @@
 <title>MultiLab</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
 
-<!-- CDN: xterm.js 终端模拟器 (必须早于 Monaco loader.js 加载) -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
-<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js"></script>
-<!-- CDN: marked.js v9 (最后一个有 global 变量的版本) -->
-<script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.3/dist/purify.min.js"></script>
-<!-- CDN: Monaco Editor (必须最后加载 —— loader.js 会往全局注入 AMD define) -->
-<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.50.0/min/vs/loader.js"></script>
+<!-- Vendor: xterm (本地 /vendor, 必须早于 Monaco loader.js 加载) -->
+<link rel="stylesheet" href="/vendor/xterm/css/xterm.css">
+<script src="/vendor/xterm/lib/xterm.js"></script>
+<script src="/vendor/addon-fit/lib/addon-fit.js"></script>
+<script src="/vendor/addon-web-links/lib/addon-web-links.js"></script>
+<!-- Vendor: marked v9 (最后一个有 global 变量的版本) + DOMPurify -->
+<script src="/vendor/marked/marked.min.js"></script>
+<script src="/vendor/dompurify/dist/purify.min.js"></script>
+<!-- Vendor: Monaco Editor (必须最后加载 —— loader.js 会往全局注入 AMD define) -->
+<script src="/vendor/monaco-editor/min/vs/loader.js"></script>
 
 <style>
   :root {
@@ -315,6 +315,9 @@
   .picker-body .file-empty { padding: 16px; text-align: center; color: var(--text-dim); font-size: 13px; }
   .picker-refresh { background: none; border: 1px solid var(--border); color: var(--text-dim); border-radius: 3px; cursor: pointer; font-size: 11px; padding: 2px 8px; }
   .picker-refresh:hover { color: var(--text); border-color: var(--text-dim); }
+  .picker-header-actions { display: flex; align-items: center; gap: 8px; }
+  .picker-close { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 6px; border-radius: 3px; }
+  .picker-close:hover { color: var(--text); background: var(--bg-elev); }
 
   .library-dropdown {
     position: fixed; top: 56px; left: 50%; transform: translateX(-50%);
@@ -505,7 +508,10 @@
   <div class="picker-dropdown" id="file-picker-dropdown">
     <div class="picker-header">
       <span>/home/student/workspace</span>
-      <button class="picker-refresh" id="picker-refresh-btn">刷新</button>
+      <div class="picker-header-actions">
+        <button class="picker-refresh" id="picker-refresh-btn">刷新</button>
+        <button type="button" class="picker-close" id="file-picker-close-btn" title="关闭" aria-label="关闭">×</button>
+      </div>
     </div>
     <div class="picker-body" id="file-picker-list">
       <div class="file-empty">加载中...</div>
@@ -518,7 +524,10 @@
   <div class="library-dropdown" id="library-dropdown">
     <div class="picker-header">
       <span>已导入教程库</span>
-      <button class="picker-refresh" id="library-refresh-btn">刷新</button>
+      <div class="picker-header-actions">
+        <button class="picker-refresh" id="library-refresh-btn">刷新</button>
+        <button type="button" class="picker-close" id="library-close-btn" title="关闭" aria-label="关闭">×</button>
+      </div>
     </div>
     <div class="library-body" id="library-list">
       <div class="library-empty">加载中...</div>

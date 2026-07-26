@@ -33,9 +33,10 @@ import {
   openFilePicker,
   closeFilePicker,
   renderFileTabs,
+  syncEditorToCurrentFile,
 } from './files.js';
 import { runCode, runTest, runPreview } from './commands.js';
-import { initTrustDialog, openTrustDialog, setPackageTrust } from './trust.js';
+import { initTrustDialog, openTrustDialog, closeTrustDialog, setPackageTrust } from './trust.js';
 import { appendSessionLog, renderLogsPane } from './session-log.js';
 import { refreshDiagnosticsPane } from './diagnostics.js';
 
@@ -46,33 +47,79 @@ setPanelHooks({
   refreshTree: (force) => refreshFileTree(force),
 });
 
-require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.50.0/min/vs' } });
-require(['vs/editor/editor.main'], () => {
-  document.getElementById('loading-msg').style.display = 'none';
-  state.editor = monaco.editor.create(document.getElementById('monaco'), {
-    value: t('files.loadingEditor'),
-    language: 'c',
-    theme: state.theme === 'dark' ? 'vs-dark' : 'vs',
-    fontSize: 14,
-    fontFamily: '"JetBrains Mono","Consolas",monospace',
-    automaticLayout: true,
-    minimap: { enabled: false },
-    scrollBeyondLastLine: false,
-    tabSize: 4,
-  });
-  state.editor.onDidChangeModelContent(() => {
-    if (state.suppressModified) return;
-    if (state.currentFiles[state.activeFileIndex] && !state.fileModified[state.activeFileIndex]) {
-      state.fileModified[state.activeFileIndex] = true;
-      renderFileTabs();
-    }
-  });
+// 教程列表不依赖 Monaco: 编辑器加载失败/超时也要能阅读教程。
+let tutorialsLoaded = false;
+function ensureTutorialsLoaded() {
+  if (tutorialsLoaded) return;
+  tutorialsLoaded = true;
   loadTutorialList();
-});
+}
+ensureTutorialsLoaded();
+
+function hideLoadingMsg(text) {
+  const el = document.getElementById('loading-msg');
+  if (!el) return;
+  if (text) {
+    el.textContent = text;
+    el.style.color = 'var(--warn)';
+    return;
+  }
+  el.style.display = 'none';
+}
+
+function bootEditor() {
+  if (typeof require !== 'function' || typeof require.config !== 'function') {
+    hideLoadingMsg(t('boot.monacoMissing'));
+    return;
+  }
+  require.config({ paths: { vs: '/vendor/monaco-editor/min/vs' } });
+  const timer = setTimeout(() => {
+    if (state.editor) return;
+    hideLoadingMsg(t('boot.monacoTimeout'));
+  }, 15000);
+  require(['vs/editor/editor.main'], () => {
+    clearTimeout(timer);
+    hideLoadingMsg();
+    state.editor = monaco.editor.create(document.getElementById('monaco'), {
+      value: t('files.loadingEditor'),
+      language: 'c',
+      theme: state.theme === 'dark' ? 'vs-dark' : 'vs',
+      fontSize: 14,
+      fontFamily: '"JetBrains Mono","Consolas",monospace',
+      automaticLayout: true,
+      minimap: { enabled: false },
+      scrollBeyondLastLine: false,
+      tabSize: 4,
+    });
+    state.editor.onDidChangeModelContent(() => {
+      if (state.suppressModified) return;
+      if (state.currentFiles[state.activeFileIndex] && !state.fileModified[state.activeFileIndex]) {
+        state.fileModified[state.activeFileIndex] = true;
+        renderFileTabs();
+      }
+    });
+    // 若 step 文件先于编辑器就绪,这里把当前文件回填进编辑器。
+    syncEditorToCurrentFile();
+  }, (err) => {
+    clearTimeout(timer);
+    console.error('[MultiLab] Monaco load failed:', err);
+    hideLoadingMsg(t('boot.monacoFailed'));
+  });
+}
+bootEditor();
 
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); runCode(); }
   if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveFile(); }
+  // Escape 关闭任意打开的浮层 (文件选择器 / 教程库 / 信任对话框)
+  if (e.key === 'Escape') {
+    const pick = document.getElementById('file-picker-overlay');
+    const lib = document.getElementById('library-overlay');
+    const trust = document.getElementById('trust-overlay');
+    if (pick?.style.display === 'block') { closeFilePicker(); e.preventDefault(); }
+    else if (lib?.style.display === 'block') { closeLibraryPanel(); e.preventDefault(); }
+    else if (trust?.style.display === 'block') { closeTrustDialog(); e.preventDefault(); }
+  }
 });
 document.getElementById('run-btn').onclick = runCode;
 document.getElementById('interrupt-btn').onclick = () => {
@@ -84,6 +131,7 @@ document.getElementById('interrupt-btn').onclick = () => {
 document.getElementById('file-picker-overlay').addEventListener('click', (e) => {
   if (e.target === e.currentTarget) closeFilePicker();
 });
+document.getElementById('file-picker-close-btn').addEventListener('click', closeFilePicker);
 document.getElementById('picker-refresh-btn').addEventListener('click', () => loadFilePickerList(true));
 document.getElementById('tab-open-btn').addEventListener('click', openFilePicker);
 document.getElementById('kernel-select').addEventListener('change', selectKernelFromUi);
@@ -93,6 +141,7 @@ document.getElementById('reconnect-btn').addEventListener('click', () => {
 });
 document.getElementById('library-btn').addEventListener('click', openLibraryPanel);
 document.getElementById('library-refresh-btn').addEventListener('click', loadLibraryList);
+document.getElementById('library-close-btn').addEventListener('click', closeLibraryPanel);
 document.getElementById('library-overlay').addEventListener('click', (e) => {
   if (e.target === e.currentTarget) closeLibraryPanel();
 });

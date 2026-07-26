@@ -21,7 +21,7 @@ function setEditorEmpty(message = t('files.emptyEditor')) {
   if (!state.editor) return;
   state.suppressModified = true;
   state.editor.setValue(message);
-  monaco.state.editor.setModelLanguage(state.editor.getModel(), state.currentTutorial?.language || 'plaintext');
+  monaco.editor.setModelLanguage(state.editor.getModel(), state.currentTutorial?.language || 'plaintext');
   state.suppressModified = false;
 }
 
@@ -87,7 +87,7 @@ function closeFile(idx) {
     setEditorEmpty();
     return;
   }
-  if (state.activeFileIndex > idx) activeFileIndex--;
+  if (state.activeFileIndex > idx) state.activeFileIndex--;
   state.activeFileIndex = Math.min(state.activeFileIndex, state.currentFiles.length - 1);
   const newIdx = state.activeFileIndex;
   state.activeFileIndex = -1;
@@ -311,7 +311,14 @@ async function loadFilePickerList(force = false) {
 }
 
 function openFilePicker() {
-  
+  document.getElementById('file-picker-overlay').style.display = 'block';
+  loadFilePickerList();
+}
+
+function closeFilePicker() {
+  document.getElementById('file-picker-overlay').style.display = 'none';
+}
+
 function switchFile(idx, force = false) {
   if (idx < 0 || idx >= state.currentFiles.length) return;
   if (!force && idx === state.activeFileIndex) return;
@@ -321,10 +328,21 @@ function switchFile(idx, force = false) {
   if (state.editor) {
     state.suppressModified = true;
     state.editor.setValue(f.content);
-    monaco.state.editor.setModelLanguage(state.editor.getModel(), f.language || state.currentTutorial?.language || 'c');
+    monaco.editor.setModelLanguage(state.editor.getModel(), f.language || state.currentTutorial?.language || 'c');
     state.suppressModified = false;
   }
   renderFileTabs();
+}
+
+// Monaco 可能晚于 step 文件就绪: 编辑器创建后调用此函数把当前文件回填进编辑器。
+function syncEditorToCurrentFile() {
+  if (!state.editor) return;
+  renderFileTabs();
+  if (state.activeFileIndex >= 0 && state.currentFiles[state.activeFileIndex]) {
+    switchFile(state.activeFileIndex, true);
+  } else {
+    setEditorEmpty();
+  }
 }
 
 export {
@@ -349,4 +367,5 @@ export {
   openFilePicker,
   closeFilePicker,
   switchFile,
+  syncEditorToCurrentFile,
 };

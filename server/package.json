@@ -7,12 +7,19 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "test:smoke": "node ../scripts/smoke-tests.mjs"
+    "test:smoke": "node ../scripts/smoke-tests.mjs",
+    "test:e2e": "node ../scripts/e2e-lesson.mjs"
   },
   "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-web-links": "^0.11.0",
+    "@xterm/xterm": "^5.5.0",
     "dockerode": "^4.0.2",
+    "dompurify": "^3.2.3",
     "dotenv": "^17.4.2",
     "express": "^4.19.2",
+    "marked": "^9.1.6",
+    "monaco-editor": "^0.50.0",
     "ws": "^8.18.0",
     "yauzl": "^3.4.0",
     "yazl": "^3.3.1"

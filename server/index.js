@@ -101,6 +101,16 @@ function getRuntimeSession() {
 // ---------- 1. Express ----------
 const app = express();
 app.use(express.json());
+// 本地 vendor 资源: 把 monaco/xterm/marked/dompurify 装进 server 依赖,
+// 通过 /vendor/* 暴露,避免浏览器拉 CDN (jsDelivr) chunk 时卡在「正在加载编辑器...」。
+// 路径避开 "@" 段以兼容更多浏览器/代理。
+const NODE_MODULES = path.join(__dirname, 'node_modules');
+app.use('/vendor/monaco-editor', express.static(path.join(NODE_MODULES, 'monaco-editor')));
+app.use('/vendor/xterm', express.static(path.join(NODE_MODULES, '@xterm/xterm')));
+app.use('/vendor/addon-fit', express.static(path.join(NODE_MODULES, '@xterm/addon-fit')));
+app.use('/vendor/addon-web-links', express.static(path.join(NODE_MODULES, '@xterm/addon-web-links')));
+app.use('/vendor/marked', express.static(path.join(NODE_MODULES, 'marked')));
+app.use('/vendor/dompurify', express.static(path.join(NODE_MODULES, 'dompurify')));
 app.use(express.static(path.join(ROOT, 'public')));
 
 // 教程列表
@@ -429,10 +439,13 @@ app.get('/api/tutorials/:id', async (req, res) => {
   try {
     const tutorial = await packageService.loadTutorial(req.params.id);
     const trust = await trustStore.getPackageTrust(tutorial.package_digest);
+    // 只读 progress,不记录 visit,不覆盖 current_step。前端据此 resume。
+    const progress = await saveService.getProgress(tutorial);
     res.json({
       ...tutorial,
       trust: trust.trust,
       trust_default: trust.default,
+      progress,
     });
   } catch (e) {
     res.status(404).json({ error: `tutorial not found: ${req.params.id}` });

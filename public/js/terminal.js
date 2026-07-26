@@ -3,19 +3,40 @@ import { toast, status } from './ui.js';
 import { t } from './messages.js';
 
 // ========== xterm ==========
-state.term = new Terminal({
-  fontFamily: '"JetBrains Mono","Consolas",monospace',
-  fontSize: 13, cursorBlink: true, theme: TERM_THEME[state.theme],
-});
-state.fitAddon = new FitAddon.FitAddon();
-state.term.loadAddon(state.fitAddon);
-state.term.loadAddon(new WebLinksAddon.WebLinksAddon());
-state.term.open(document.getElementById('terminal'));
-state.fitAddon.fit();
-window.addEventListener('resize', () => state.fitAddon.fit());
-state.term.onData((data) => {
-  if (state.ws && state.ws.readyState === WebSocket.OPEN) state.ws.send(JSON.stringify({ type: 'input', data }));
-});
+// xterm 全局由 /vendor 脚本提供;若加载失败不要让整个模块图崩掉。
+function initTerminal() {
+  const host = document.getElementById('terminal');
+  if (!host) return;
+  if (typeof Terminal === 'undefined') {
+    console.error('[MultiLab] xterm Terminal global missing — check /vendor/xterm');
+    status(t('ws.xtermMissing'));
+    return;
+  }
+  try {
+    state.term = new Terminal({
+      fontFamily: '"JetBrains Mono","Consolas",monospace',
+      fontSize: 13, cursorBlink: true, theme: TERM_THEME[state.theme],
+    });
+    state.fitAddon = (typeof FitAddon !== 'undefined') ? new FitAddon.FitAddon() : null;
+    if (state.fitAddon) state.term.loadAddon(state.fitAddon);
+    if (typeof WebLinksAddon !== 'undefined') {
+      state.term.loadAddon(new WebLinksAddon.WebLinksAddon());
+    }
+    state.term.open(host);
+    if (state.fitAddon) state.fitAddon.fit();
+    window.addEventListener('resize', () => state.fitAddon && state.fitAddon.fit());
+    state.term.onData((data) => {
+      if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify({ type: 'input', data }));
+      }
+    });
+  } catch (e) {
+    console.error('[MultiLab] terminal init failed:', e);
+    state.term = null;
+    state.fitAddon = null;
+  }
+}
+initTerminal();
 
 // ========== WebSocket ==========
 function connectWS() {
@@ -24,13 +45,13 @@ function connectWS() {
     clearTimeout(state.wsReconnectTimer);
     state.wsReconnectTimer = null;
   }
-  const proto = location.protocol === 'https:' ? 'wss' : 'state.ws';
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   state.ws = new WebSocket(`${proto}://${location.host}/ws`);
   state.ws.onopen = () => status(t('ws.connected'));
   state.ws.onmessage = (e) => {
     let msg; try { msg = JSON.parse(e.data); } catch { return; }
-    if (msg.type === 'output') state.term.write(msg.data);
-    else if (msg.type === 'exit') state.term.write(`\r\n\x1b[90m${t('ws.processExit', { code: msg.code })}\x1b[0m\r\n`);
+    if (msg.type === 'output') { if (state.term) state.term.write(msg.data); }
+    else if (msg.type === 'exit') { if (state.term) state.term.write(`\r\n\x1b[90m${t('ws.processExit', { code: msg.code })}\x1b[0m\r\n`); }
     else if (msg.type === 'status') status(msg.message);
     else if (msg.type === 'ready') status(t('ws.ready'));
     else if (msg.type === 'error') {
@@ -40,7 +61,7 @@ function connectWS() {
         return;
       }
       toast(msg.message, true);
-      state.term.write(`\r\n\x1b[31m${t('ws.errorBanner', { error: msg.message })}\x1b[0m\r\n`);
+      if (state.term) state.term.write(`\r\n\x1b[31m${t('ws.errorBanner', { error: msg.message })}\x1b[0m\r\n`);
     }
   };
   state.ws.onclose = () => {
@@ -59,7 +80,7 @@ function reconnectWS(opts = {}) {
   if (state.ws) {
     try { state.ws.onclose = null; state.ws.close(); } catch {}
   }
-  if (opts.reason) {
+  if (opts.reason && state.term) {
     state.term.write(`\r\n\x1b[90m${t('ws.reconnectBanner', { reason: opts.reason })}\x1b[0m\r\n`);
   }
   connectWS();

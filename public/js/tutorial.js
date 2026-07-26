@@ -237,15 +237,19 @@ async function loadTutorial(id) {
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => '')}`);
     state.currentTutorial = await res.json();
     if (!state.currentTutorial || !state.currentTutorial.steps?.length) throw new Error(t('tutorial.invalidData'));
-    state.currentProgress = normalizeProgress(null);
+    state.currentProgress = normalizeProgress(state.currentTutorial.progress || null);
     state.auxVisible = false;
     applyPanelLayout();
     renderTrustButton();
     await refreshKernelResolution();
     appendSessionLog(t('tutorial.openLog', { id: state.currentTutorial.id || id }));
-    // Probe step 0 load for progress, then jump to saved current_step when present.
-    state.currentStep = 0;
-    await enterStep(0, { skipSave: true, resumeProgress: true });
+    // 直接从 tutorial detail 的 progress resume current_step。
+    // 不要先 load step 0 探测: loadStepState 会 recordStepVisit, 把 current_step 覆盖成 0。
+    const resumeStepId = state.currentTutorial.progress?.current_step;
+    const resumeIdx = resumeStepId ? stepIndexFromId(state.currentTutorial, resumeStepId) : -1;
+    const startIdx = resumeIdx >= 0 ? resumeIdx : 0;
+    state.currentStep = startIdx;
+    await enterStep(startIdx, { skipSave: true });
   } catch (e) {
     console.error(`[MultiLab] 加载教程 ${id} 失败:`, e);
     appendSessionLog(t('tutorial.loadFailed', { error: e.message }), 'error');
@@ -270,13 +274,6 @@ async function enterStep(targetIndex, opts = {}) {
     const result = await apiJson('/api/steps/load', { tutorial: currentTutorialKey(), step: step.id });
     if (seq !== state.stepLoadSeq) return;
     applyProgress(result.progress);
-    if (opts.resumeProgress && result.progress?.current_step) {
-      const resumeIdx = stepIndexFromId(state.currentTutorial, result.progress.current_step);
-      if (resumeIdx > 0) {
-        await enterStep(resumeIdx, { skipSave: true });
-        return;
-      }
-    }
     loadFilesIntoEditor(result.files || []);
     renderTutorialStepText();
     applyProgressToUi();

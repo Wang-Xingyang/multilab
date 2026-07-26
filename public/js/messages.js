@@ -4,6 +4,11 @@
  */
 
 const catalog = {
+  boot: {
+    monacoMissing: '编辑器加载器未就绪。请硬刷新页面；若仍失败请检查 /vendor/monaco-editor 是否可访问',
+    monacoTimeout: '编辑器加载超时。教程已加载，可阅读；编辑器可硬刷新后重试',
+    monacoFailed: '编辑器加载失败。教程已加载，可阅读；编辑器可硬刷新后重试',
+  },
   trust: {
     unloaded: '未加载',
     title: '当前 package trust 状态',
@@ -42,6 +47,7 @@ const catalog = {
     reconnectBanner: '[终端重连: {reason}]',
     processExit: '[进程退出, code={code}]',
     errorBanner: '[错误] {error}',
+    xtermMissing: '终端库未加载，请检查 /vendor/xterm',
   },
   package: {
     pickMlab: '请选择 .mlab 文件',
