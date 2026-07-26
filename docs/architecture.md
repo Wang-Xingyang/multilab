@@ -44,6 +44,7 @@ Node host
   SecurityPolicyService
   TrustStore
   KernelRegistry
+  RuntimeManager
   RuntimeProvider abstraction
 
 Docker runtime
@@ -51,9 +52,10 @@ Docker runtime
   student user
   /home/student/workspace
   gcc/gdb/make/valgrind/strace
+  NetworkMode/security options from selected kernel
 ```
 
-Docker is currently the only implemented provider. It now sits behind a small `RuntimeProvider` abstraction so API and WebSocket logic do not manage Docker containers directly.
+Docker is currently the only implemented provider. `RuntimeManager` selects a provider from the resolved kernel's `provider` field, then asks that provider to apply kernel image/network/sandbox settings before starting a session.
 
 ## Tutorial Loading
 
@@ -307,14 +309,18 @@ Current command execution policy:
 - packages that do not require network access require a selected kernel whose `network_default` is `none`;
 - packages that require network access are rejected until a network-capable selected kernel/runtime path exists.
 
-This policy currently guards command execution, but it does not yet dynamically select a runtime provider or change Docker network settings.
+Command execution and step workspace IO go through `RuntimeManager`, which binds the selected kernel to a registered provider. For the Docker provider, container creation now applies:
+
+- `NetworkMode: none` when `network_default` is `none`;
+- `SecurityOpt: no-new-privileges` for non-`none` sandbox presets;
+- labels recording kernel id/image/network/sandbox so mismatched existing containers are recreated.
 
 Target security model:
 
 - trust state per package digest;
 - sandbox-capable kernel required by default for untrusted packages;
 - Docker provider as first official sandbox provider;
-- future provider abstraction for WSL/local/remote/Wasm/VM.
+- future additional providers for WSL/local/remote/Wasm/VM.
 
 Current trust APIs:
 
@@ -325,7 +331,7 @@ POST /api/trust { package_digest, trust }
 
 The user-settable trust values are currently `untrusted` and `user-trusted`.
 
-The frontend shows the current package trust state in the header and lets the user toggle between these two values. This persists trust metadata only; runtime selection, sandbox enforcement, and network policy enforcement are still future work.
+The frontend shows the current package trust state in the header and lets the user toggle between these two values. Trust metadata is enforced at command time together with kernel/runtime selection.
 
 ## Kernel Registry
 
@@ -338,16 +344,18 @@ gcc-ubuntu24-docker
   platform: linux
   capabilities: tty, compile, debug, signals, sandbox
   network_default: none
+  sandbox_presets: standard
 ```
 
-Current kernel APIs:
+Current kernel/runtime APIs:
 
 ```text
 GET /api/kernels
 GET /api/kernels/resolve?tutorial=<id>
+GET /api/runtime
 ```
 
-The resolver currently checks required platform, capabilities, command names, and simple command version constraints such as `>=13`, then prefers `recommended_kernel`. It returns `version_mismatches` for incompatible command versions. It does not yet enforce runtime selection or support complex semver ranges.
+The resolver currently checks required platform, capabilities, command names, and simple command version constraints such as `>=13`, then prefers `recommended_kernel`. It returns `version_mismatches` for incompatible command versions and a `runtime` plan describing the provider/network/sandbox binding. Complex semver ranges and dynamic `kernels.json` loading are still not implemented. User-facing kernel switching UI is not implemented yet.
 
 ## Known Limitations
 
@@ -355,6 +363,6 @@ The resolver currently checks required platform, capabilities, command names, an
 - `.mlab` pack/unpack CLI, host-path import, and browser upload/open are implemented.
 - `.mlab-save` host-path export/import and browser upload/download are implemented.
 - Kernel registry is static and only contains the default Docker kernel.
-- Runtime provider selection is not yet driven by the selected kernel.
+- Runtime selection is automatic from the resolved kernel; there is no user kernel picker yet.
 - Panel declarations are present in manifests but not fully rendered dynamically.
 - The Docker container is single-session and not suitable for multi-user deployment.

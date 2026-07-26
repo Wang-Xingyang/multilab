@@ -9,16 +9,17 @@ import {
 } from './PackageService.js';
 
 export class SaveService {
-  constructor({ runtimeStateDir, runtimeSession, packageService }) {
+  constructor({ runtimeStateDir, runtimeSession = null, runtimeManager = null, packageService }) {
     this.runtimeStateDir = runtimeStateDir;
     this.runtimeSession = runtimeSession;
+    this.runtimeManager = runtimeManager;
     this.packageService = packageService;
   }
 
   async loadStepState(tutorialId, stepId) {
     validateSafePath(tutorialId);
     validateSafePath(stepId);
-    await this.ensureRuntimeDirs();
+    await this.ensureRuntimeDirs(tutorialId);
     const cfg = await this.packageService.loadTutorial(tutorialId);
     const step = findStep(cfg, stepId);
     const ownSaveDir = this.saveDir(cfg, step.id);
@@ -84,7 +85,7 @@ export class SaveService {
   async saveStepState(tutorialId, stepId, files) {
     validateSafePath(tutorialId);
     validateSafePath(stepId);
-    await this.ensureRuntimeDirs();
+    await this.ensureRuntimeDirs(tutorialId);
     const cfg = await this.packageService.loadTutorial(tutorialId);
     const step = findStep(cfg, stepId);
     const dest = this.saveDir(cfg, step.id);
@@ -103,7 +104,7 @@ export class SaveService {
   async resetStepState(tutorialId, stepId) {
     validateSafePath(tutorialId);
     validateSafePath(stepId);
-    await this.ensureRuntimeDirs();
+    await this.ensureRuntimeDirs(tutorialId);
     const cfg = await this.packageService.loadTutorial(tutorialId);
     const step = findStep(cfg, stepId);
     const dest = this.saveDir(cfg, step.id);
@@ -120,13 +121,28 @@ export class SaveService {
     };
   }
 
-  async ensureRuntimeDirs() {
+  async ensureRuntimeDirs(tutorialId = null) {
     await this.ensureSaveRootDirs();
-    await this.runtimeSession.ensureWorkspace();
+    const session = await this.resolveRuntimeSession(tutorialId);
+    await session.ensureWorkspace();
   }
 
   async ensureSaveRootDirs() {
     await fs.mkdir(path.join(this.runtimeStateDir, 'saves'), { recursive: true });
+  }
+
+  async resolveRuntimeSession(tutorialId = null) {
+    if (this.runtimeManager) {
+      if (tutorialId) {
+        const ensured = await this.runtimeManager.ensureForTutorial(tutorialId);
+        return ensured.session;
+      }
+      return this.runtimeManager.getSession();
+    }
+    if (!this.runtimeSession) {
+      throw Object.assign(new Error('runtime session is not ready'), { statusCode: 503 });
+    }
+    return this.runtimeSession;
   }
 
   saveDir(cfg, stepId) {
@@ -305,7 +321,8 @@ export class SaveService {
   }
 
   async loadWorkspaceFiles() {
-    const files = await this.runtimeSession.readFiles();
+    const session = await this.resolveRuntimeSession();
+    const files = await session.readFiles();
     return files.map(file => {
       const name = validateFileName(file.name);
       const ext = path.extname(name).toLowerCase();
@@ -318,11 +335,12 @@ export class SaveService {
   }
 
   async writeFilesToWorkspace(files, opts = {}) {
+    const session = await this.resolveRuntimeSession();
     const normalizedFiles = (files || []).map(f => {
       const name = validateFileName(f.name || 'untitled');
       return { name, content: f.content || '' };
     });
-    await this.runtimeSession.writeFiles(normalizedFiles, opts);
+    await session.writeFiles(normalizedFiles, opts);
   }
 }
 

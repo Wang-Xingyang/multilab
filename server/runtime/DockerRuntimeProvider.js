@@ -10,16 +10,57 @@ export class DockerRuntimeProvider extends RuntimeProvider {
     docker = new Docker(),
   }) {
     super({ id: 'docker', kind: 'docker' });
+    this.defaultImage = image;
     this.image = image;
     this.containerName = containerName;
     this.workspaceDir = workspaceDir;
+    this.networkMode = 'none';
+    this.sandboxPreset = 'standard';
+    this.kernelId = null;
     this.docker = docker;
     this.session = new DockerRuntimeSession({
+      provider: this,
       docker,
-      image,
       containerName,
-      workspaceDir,
     });
+  }
+
+  planKernelSession(kernel) {
+    const image = kernel.image || this.defaultImage;
+    const workspaceDir = kernel.workspace || this.workspaceDir || '/home/student/workspace';
+    const networkMode = kernel.network_default === 'none' ? 'none' : 'bridge';
+    const sandboxPreset = pickSandboxPreset(kernel);
+    return {
+      kernel,
+      image,
+      workspaceDir,
+      networkMode,
+      sandboxPreset,
+      fingerprint: [
+        'docker',
+        kernel.id,
+        image,
+        workspaceDir,
+        networkMode,
+        sandboxPreset,
+      ].join('|'),
+    };
+  }
+
+  async applyKernel(kernel) {
+    const plan = this.planKernelSession(kernel);
+    this.kernelId = kernel.id;
+    this.image = plan.image;
+    this.workspaceDir = plan.workspaceDir;
+    this.networkMode = plan.networkMode;
+    this.sandboxPreset = plan.sandboxPreset;
+    this.session.image = plan.image;
+    this.session.workspaceDir = plan.workspaceDir;
+    this.session.networkMode = plan.networkMode;
+    this.session.sandboxPreset = plan.sandboxPreset;
+    this.session.kernelId = kernel.id;
+    this.session.policyFingerprint = plan.fingerprint;
+    return plan;
   }
 
   async startSession() {
@@ -29,24 +70,33 @@ export class DockerRuntimeProvider extends RuntimeProvider {
 }
 
 export class DockerRuntimeSession extends RuntimeSession {
-  constructor({ docker, image, containerName, workspaceDir }) {
+  constructor({ provider, docker, containerName }) {
     super();
+    this.provider = provider;
     this.docker = docker;
-    this.image = image;
     this.containerName = containerName;
-    this.workspaceDir = workspaceDir;
+    this.image = provider.image;
+    this.workspaceDir = provider.workspaceDir;
+    this.networkMode = provider.networkMode;
+    this.sandboxPreset = provider.sandboxPreset;
+    this.kernelId = provider.kernelId;
+    this.policyFingerprint = null;
     this.container = null;
     this.containerPromise = null;
     this.workspaceReady = false;
+    this.appliedFingerprint = null;
   }
 
   async ensure() {
-    if (this.container) return this.container;
+    if (this.container && this.appliedFingerprint === this.policyFingerprint) {
+      return this.container;
+    }
     if (this.containerPromise) return this.containerPromise;
 
     this.containerPromise = this.#ensureContainerUncached()
       .then(container => {
         this.container = container;
+        this.appliedFingerprint = this.policyFingerprint;
         return container;
       })
       .finally(() => {
@@ -261,20 +311,57 @@ done
       );
     }
 
+    const desired = desiredContainerLabels({
+      kernelId: this.kernelId,
+      image: this.image,
+      networkMode: this.networkMode,
+      sandboxPreset: this.sandboxPreset,
+    });
+
     const containers = await this.docker.listContainers({ all: true });
     const existing = containers.find(c => c.Names.includes('/' + this.containerName));
 
     if (existing) {
-      if (existing.State !== 'running') {
-        console.log(`[docker] 启动已存在的容器 ${this.containerName}`);
-        await this.docker.getContainer(existing.Id).start();
-      } else {
-        console.log(`[docker] 容器 ${this.containerName} 已在运行`);
+      const container = this.docker.getContainer(existing.Id);
+      const inspect = await container.inspect();
+      const labels = inspect.Config?.Labels || {};
+      if (labelsMatch(labels, desired)) {
+        if (existing.State !== 'running') {
+          console.log(`[docker] 启动已存在的容器 ${this.containerName}`);
+          await container.start();
+        } else {
+          console.log(`[docker] 容器 ${this.containerName} 已在运行 (kernel=${this.kernelId || 'default'})`);
+        }
+        this.workspaceReady = false;
+        return container;
       }
-      return this.docker.getContainer(existing.Id);
+
+      console.log(
+        `[docker] 容器 ${this.containerName} 策略不匹配，按 kernel 重建 ` +
+        `(network=${this.networkMode}, sandbox=${this.sandboxPreset})`
+      );
+      try {
+        if (existing.State === 'running') await container.stop({ t: 5 });
+      } catch {
+        // Container may already be stopped.
+      }
+      await container.remove({ force: true });
+      this.container = null;
+      this.workspaceReady = false;
     }
 
-    console.log(`[docker] 创建并启动新容器 ${this.containerName}`);
+    console.log(
+      `[docker] 创建并启动新容器 ${this.containerName} ` +
+      `(kernel=${this.kernelId || 'default'}, network=${this.networkMode}, sandbox=${this.sandboxPreset})`
+    );
+    const hostConfig = {
+      AutoRemove: false,
+      NetworkMode: this.networkMode,
+    };
+    if (this.sandboxPreset !== 'none') {
+      hostConfig.SecurityOpt = ['no-new-privileges:true'];
+    }
+
     const container = await this.docker.createContainer({
       name: this.containerName,
       Hostname: 'tutorial',
@@ -282,11 +369,11 @@ done
       Cmd: ['sleep', 'infinity'],
       Tty: true,
       OpenStdin: true,
-      HostConfig: {
-        AutoRemove: false,
-      },
+      Labels: desired,
+      HostConfig: hostConfig,
     });
     await container.start();
+    this.workspaceReady = false;
     return container;
   }
 
@@ -330,5 +417,26 @@ function validateFileName(name) {
     throw Object.assign(new Error('Invalid file name'), { statusCode: 400 });
   }
   return name;
+}
+
+function pickSandboxPreset(kernel) {
+  const presets = Array.isArray(kernel.sandbox_presets) ? kernel.sandbox_presets : [];
+  if (presets.includes('standard')) return 'standard';
+  if (presets.length) return presets[0];
+  if ((kernel.capabilities || []).includes('sandbox')) return 'standard';
+  return 'none';
+}
+
+function desiredContainerLabels({ kernelId, image, networkMode, sandboxPreset }) {
+  return {
+    'multilab.kernel.id': String(kernelId || ''),
+    'multilab.image': String(image || ''),
+    'multilab.network': String(networkMode || ''),
+    'multilab.sandbox': String(sandboxPreset || ''),
+  };
+}
+
+function labelsMatch(actual, desired) {
+  return Object.entries(desired).every(([key, value]) => actual?.[key] === value);
 }
 

@@ -13,6 +13,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { DockerRuntimeProvider } from './runtime/DockerRuntimeProvider.js';
+import { RuntimeManager } from './runtime/RuntimeManager.js';
 import {
   PackageService,
   validateFileName,
@@ -47,12 +48,11 @@ const PACKAGE_LIBRARY_DIR = process.env.PACKAGE_LIBRARY_DIR
   ? path.resolve(__dirname, process.env.PACKAGE_LIBRARY_DIR)
   : path.join(RUNTIME_STATE_DIR, 'packages');
 
-const runtimeProvider = new DockerRuntimeProvider({
+const dockerRuntimeProvider = new DockerRuntimeProvider({
   image: EXEC_IMAGE,
   containerName: CONTAINER_NAME,
   workspaceDir: WORKSPACE_DIR,
 });
-const runtimeSession = runtimeProvider.session;
 const archiveService = new MlabArchiveService();
 const packageLibrary = new PackageLibrary({
   libraryDir: PACKAGE_LIBRARY_DIR,
@@ -62,17 +62,22 @@ const packageService = new PackageService({
   tutorialsDir: TUTORIALS_DIR,
   packageLibrary,
 });
-const saveService = new SaveService({
-  runtimeStateDir: RUNTIME_STATE_DIR,
-  runtimeSession,
-  packageService,
-});
-const saveArchiveService = new MlabSaveArchiveService({ saveService });
-const trustStore = new TrustStore({ runtimeStateDir: RUNTIME_STATE_DIR });
 const kernelRegistry = createDefaultKernelRegistry({
   image: EXEC_IMAGE,
   workspaceDir: WORKSPACE_DIR,
 });
+const runtimeManager = new RuntimeManager({
+  providers: { docker: dockerRuntimeProvider },
+  kernelRegistry,
+  packageService,
+});
+const saveService = new SaveService({
+  runtimeStateDir: RUNTIME_STATE_DIR,
+  runtimeManager,
+  packageService,
+});
+const saveArchiveService = new MlabSaveArchiveService({ saveService });
+const trustStore = new TrustStore({ runtimeStateDir: RUNTIME_STATE_DIR });
 const securityPolicyService = new SecurityPolicyService({
   packageService,
   trustStore,
@@ -80,10 +85,14 @@ const securityPolicyService = new SecurityPolicyService({
 });
 const commandService = new CommandService({
   packageService,
-  runtimeSession,
+  runtimeManager,
   securityPolicyService,
   saveService,
 });
+
+function getRuntimeSession() {
+  return runtimeManager.getSession();
+}
 
 // ---------- 1. Express ----------
 const app = express();
@@ -135,7 +144,37 @@ app.get('/api/kernels/resolve', async (req, res) => {
     const tutorialId = req.query.tutorial;
     if (!tutorialId) return res.status(400).json({ error: 'tutorial required' });
     const tutorial = await packageService.loadTutorial(tutorialId);
-    res.json(kernelRegistry.resolveForPackage(tutorial));
+    const resolution = kernelRegistry.resolveForPackage(tutorial);
+    let runtime = null;
+    if (resolution.selected) {
+      const provider = runtimeManager.getProviderForKernel(resolution.selected);
+      const plan = provider.planKernelSession
+        ? provider.planKernelSession(resolution.selected)
+        : null;
+      const active = runtimeManager.getActiveKernel();
+      runtime = {
+        provider: resolution.selected.provider,
+        network_mode: plan?.networkMode || null,
+        sandbox_preset: plan?.sandboxPreset || null,
+        image: plan?.image || resolution.selected.image || null,
+        active: Boolean(active && active.id === resolution.selected.id),
+        active_kernel_id: active?.id || null,
+      };
+    }
+    res.json({ ...resolution, runtime });
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message });
+  }
+});
+
+app.get('/api/runtime', async (req, res) => {
+  try {
+    const active = runtimeManager.getActiveKernel();
+    res.json({
+      providers: runtimeManager.listProviders(),
+      active_kernel: active,
+      active_fingerprint: runtimeManager.activeFingerprint,
+    });
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message });
   }
@@ -318,7 +357,7 @@ app.post('/api/commands/run', async (req, res) => {
 // ---------- 2. 容器文件系统 API ----------
 // 在容器中执行短命令并返回 stdout (非 TTY,非交互)
 async function containerExec(cmdArray, opts = {}) {
-  return runtimeSession.exec(cmdArray, opts);
+  return getRuntimeSession().exec(cmdArray, opts);
 }
 
 // 列出工作区文件
@@ -354,7 +393,7 @@ app.post('/api/fs/write', async (req, res) => {
     const { path: filePath, content } = req.body;
     if (!filePath) return res.status(400).json({ error: 'path required' });
     validateContainerPath(filePath);
-    await runtimeSession.uploadScript(content, filePath);
+    await getRuntimeSession().uploadScript(content, filePath);
     res.json({ path: filePath, saved: true });
   } catch (e) { res.status(e.statusCode || 500).json({ error: e.message }); }
 });
@@ -364,7 +403,7 @@ app.post('/api/fs/write', async (req, res) => {
 // 导出工作区为 tar.gz
 app.get('/api/workspace/export', async (req, res) => {
   try {
-    const buf = await runtimeSession.exportWorkspaceArchive();
+    const buf = await getRuntimeSession().exportWorkspaceArchive();
     res.setHeader('Content-Type', 'application/gzip');
     res.setHeader('Content-Disposition', 'attachment; filename="workspace.tar.gz"');
     res.send(buf);
@@ -386,7 +425,7 @@ wss.on('connection', (ws) => {
 
   (async () => {
     try {
-      terminal = await runtimeSession.attachTerminal({
+      terminal = await getRuntimeSession().attachTerminal({
         onOutput(data) {
           if (ws.readyState === ws.OPEN) {
             ws.send(JSON.stringify({ type: 'output', data }));
@@ -446,7 +485,7 @@ wss.on('connection', (ws) => {
     if (msg.type === 'resize') {
       if (terminal && msg.cols && msg.rows) {
         try {
-          await runtimeSession.resize(terminal, msg.cols, msg.rows);
+          await getRuntimeSession().resize(terminal, msg.cols, msg.rows);
         } catch {}
       }
       return;
@@ -455,7 +494,7 @@ wss.on('connection', (ws) => {
     // ④ Ctrl+C / 中断 —— 往 shell stdin 发 \x03,不杀常驻 shell
     if (msg.type === 'interrupt') {
       if (terminal) {
-        await runtimeSession.interrupt(terminal);
+        await getRuntimeSession().interrupt(terminal);
         ws.send(JSON.stringify({ type: 'status', message: 'interrupted' }));
       }
       return;
@@ -470,12 +509,15 @@ wss.on('connection', (ws) => {
 });
 
 // ---------- 4. 启动 ----------
-runtimeProvider.startSession()
-  .then(() => {
+runtimeManager.ensureDefaultSession()
+  .then(ensured => {
     server.listen(PORT, () => {
+      const kernel = ensured.kernel;
       console.log(`\n  MultiLab running at  http://localhost:${PORT}\n`);
-      console.log(`  Container: ${CONTAINER_NAME} (${EXEC_IMAGE})`);
-      console.log(`  Stop with Ctrl+C — container 会保留,下次启动复用\n`);
+      console.log(`  Kernel: ${kernel.id} (${kernel.provider})`);
+      console.log(`  Container: ${CONTAINER_NAME} (${kernel.image || EXEC_IMAGE})`);
+      console.log(`  Network: ${ensured.plan?.networkMode || 'n/a'}  Sandbox: ${ensured.plan?.sandboxPreset || 'n/a'}`);
+      console.log(`  Stop with Ctrl+C — container 会保留,策略变化时按 kernel 重建\n`);
     });
   })
   .catch(e => {
