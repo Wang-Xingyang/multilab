@@ -2,19 +2,21 @@
 
 MultiLab is a local-first interactive tutorial player for programming labs.
 
-It runs `.mlab`-style tutorial directories from a local tutorial repository. A tutorial declares its manifest in `multilab.json`, provides real Markdown/code/script files, and runs commands inside a kernel/runtime. The current official runtime is a Docker container for OS/C labs.
+It runs tutorial packages that declare a `multilab.json` manifest, provide real Markdown/code/script files, and execute commands inside a kernel/runtime. The current official runtime is a Docker container for OS/C labs. Tutorials can also be packed as `.mlab` archives and imported into a local package library.
 
 ## Current Status
 
 This repository is an early prototype of the MultiLab host:
 
 - frontend: single-page `public/index.html` with Monaco Editor and xterm.js;
-- backend: `server/index.js` with Express, WebSocket, and dockerode;
-- runtime: `docker/os.Dockerfile` with Ubuntu, gcc, gdb, make, valgrind, strace;
-- package format: tutorial directories with `multilab.json`;
+- backend: Node ESM services behind `server/index.js` (Express + WebSocket);
+- runtime: `docker/os.Dockerfile` behind a `RuntimeProvider` abstraction;
+- package format: `multilab.json` directories and `.mlab` ZIP packages;
+- package sources: development directories under `TUTORIALS_DIR` and imported packages under `.multilab-state/packages/`;
 - command model: manifest-declared `commands[]` with script files;
-- step model: explicit `inherit_mode`;
-- state: local step saves under `.multilab-state`.
+- security: digest-keyed trust store (default `untrusted`) and command-time security policy gates;
+- kernels: static `KernelRegistry` with `gcc-ubuntu24-docker` and simple version matching;
+- saves: versioned step files plus `save.json` progress metadata under `.multilab-state/saves/`.
 
 The long-term product direction is documented in:
 
@@ -43,6 +45,8 @@ multilab/
     index.html
   server/
     index.js
+    runtime/
+    services/
     package.json
     .env.example
   docs/
@@ -82,7 +86,7 @@ npm install
 cp .env.example .env
 ```
 
-The default `.env` points `TUTORIALS_DIR` at `../../tutorials`.
+The default `.env` points `TUTORIALS_DIR` at `../../tutorials` and stores runtime state under `../.multilab-state`.
 
 Start the server:
 
@@ -113,9 +117,32 @@ tutorials/<id>/
         test.sh
 ```
 
-The manifest declares metadata, runtime requirements, panels, steps, `inherit_mode`, and commands. Script content is stored in real files and read only when executed.
+The manifest declares metadata, runtime requirements, security policy, panels, steps, `inherit_mode`, and commands. Script content is stored in real files and read only when executed.
 
 See `docs/tutorial-authoring.md`.
+
+## Packages, Trust, and Saves
+
+Development tutorials under `TUTORIALS_DIR` remain openable by id, for example `/api/tutorials/hello-c`.
+
+Imported `.mlab` packages are unpacked under:
+
+```text
+.multilab-state/packages/<id>/<version>/<digest>/unpacked/
+```
+
+They appear in `/api/tutorials` with a digest-derived `source_key` such as `pkg-<sha256hex>`. The UI can import a local `.mlab` path through `POST /api/packages/import`. Browser file upload is not implemented yet.
+
+Trust is keyed by package digest and defaults to `untrusted`. The UI can toggle `untrusted` / `user-trusted` through `/api/trust`. Command execution is gated by `SecurityPolicyService`: untrusted or sandbox-required packages need a sandbox-capable kernel, and network-disabled packages require a kernel with `network_default: none`.
+
+Step saves are stored by package identity:
+
+```text
+.multilab-state/saves/<id>/<version>/<digest>/steps/<step>/files/
+.multilab-state/saves/<id>/<version>/<digest>/save.json
+```
+
+`save.json` currently tracks `current_step`, `visited`, `test_passed`, and `updated_at`. `.mlab-save` export/import is not implemented yet.
 
 ## Checks
 
@@ -140,6 +167,14 @@ cd multilab
 node -e "const fs=require('fs'); const vm=require('vm'); const html=fs.readFileSync('public/index.html','utf8'); const scripts=[...html.matchAll(/<script>([\\s\\S]*?)<\\/script>/g)].map(m=>m[1]).join('\\n'); new vm.Script(scripts); console.log('inline script syntax OK');"
 ```
 
+Pack / unpack a tutorial package:
+
+```bash
+cd multilab
+python3 docs/tutorial-skill/scripts/pack_mlab.py ../tutorials/hello-c -o /tmp/hello-c.mlab
+python3 docs/tutorial-skill/scripts/unpack_mlab.py /tmp/hello-c.mlab -o /tmp/hello-c-unpacked
+```
+
 ## Documentation
 
 - `docs/architecture.md`: current host/runtime/package architecture.
@@ -153,3 +188,5 @@ node -e "const fs=require('fs'); const vm=require('vm'); const html=fs.readFileS
 - Do not reintroduce `run_cmd`, `has_run`, `has_test`, `/api/test`, or WebSocket `type: "run"`.
 - New execution should go through manifest `commands[]`.
 - Docker is the first official runtime provider, not the permanent architecture boundary.
+- Keep trust defaulting to untrusted and network defaulting to denied unless a package explicitly requires it.
+- Prefer service boundaries: PackageService, PackageLibrary, SaveService, CommandService, SecurityPolicyService, TrustStore, KernelRegistry.
