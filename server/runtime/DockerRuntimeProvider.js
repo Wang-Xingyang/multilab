@@ -1,6 +1,11 @@
 import Docker from 'dockerode';
 import { PassThrough } from 'stream';
 import { RuntimeProvider, RuntimeSession } from './RuntimeProvider.js';
+import {
+  allocatePortBindings,
+  normalizePublishPorts,
+  portMapFromInspect,
+} from '../services/PreviewPortMap.js';
 
 export class DockerRuntimeProvider extends RuntimeProvider {
   constructor({
@@ -16,6 +21,7 @@ export class DockerRuntimeProvider extends RuntimeProvider {
     this.workspaceDir = workspaceDir;
     this.networkMode = 'none';
     this.sandboxPreset = 'standard';
+    this.publishPorts = [];
     this.kernelId = null;
     this.docker = docker;
     this.session = new DockerRuntimeSession({
@@ -30,12 +36,17 @@ export class DockerRuntimeProvider extends RuntimeProvider {
     const workspaceDir = kernel.workspace || this.workspaceDir || '/home/student/workspace';
     const networkMode = kernel.network_default === 'none' ? 'none' : 'bridge';
     const sandboxPreset = pickSandboxPreset(kernel);
+    // Port publish only works with a real network mode (not none).
+    const publishPorts = networkMode === 'none'
+      ? []
+      : normalizePublishPorts(kernel.publish_ports);
     return {
       kernel,
       image,
       workspaceDir,
       networkMode,
       sandboxPreset,
+      publishPorts,
       fingerprint: [
         'docker',
         kernel.id,
@@ -43,6 +54,7 @@ export class DockerRuntimeProvider extends RuntimeProvider {
         workspaceDir,
         networkMode,
         sandboxPreset,
+        publishPorts.join(','),
       ].join('|'),
     };
   }
@@ -54,10 +66,12 @@ export class DockerRuntimeProvider extends RuntimeProvider {
     this.workspaceDir = plan.workspaceDir;
     this.networkMode = plan.networkMode;
     this.sandboxPreset = plan.sandboxPreset;
+    this.publishPorts = plan.publishPorts;
     this.session.image = plan.image;
     this.session.workspaceDir = plan.workspaceDir;
     this.session.networkMode = plan.networkMode;
     this.session.sandboxPreset = plan.sandboxPreset;
+    this.session.publishPorts = plan.publishPorts;
     this.session.kernelId = kernel.id;
     this.session.policyFingerprint = plan.fingerprint;
     return plan;
@@ -79,12 +93,18 @@ export class DockerRuntimeSession extends RuntimeSession {
     this.workspaceDir = provider.workspaceDir;
     this.networkMode = provider.networkMode;
     this.sandboxPreset = provider.sandboxPreset;
+    this.publishPorts = provider.publishPorts || [];
     this.kernelId = provider.kernelId;
     this.policyFingerprint = null;
     this.container = null;
     this.containerPromise = null;
     this.workspaceReady = false;
     this.appliedFingerprint = null;
+    this.portMap = {};
+  }
+
+  getPortMap() {
+    return { ...this.portMap };
   }
 
   async ensure() {
@@ -311,11 +331,13 @@ done
       );
     }
 
+    const publishPorts = normalizePublishPorts(this.publishPorts);
     const desired = desiredContainerLabels({
       kernelId: this.kernelId,
       image: this.image,
       networkMode: this.networkMode,
       sandboxPreset: this.sandboxPreset,
+      publishPorts,
     });
 
     const containers = await this.docker.listContainers({ all: true });
@@ -332,13 +354,14 @@ done
         } else {
           console.log(`[docker] 容器 ${this.containerName} 已在运行 (kernel=${this.kernelId || 'default'})`);
         }
+        this.portMap = portMapFromInspect(inspect);
         this.workspaceReady = false;
         return container;
       }
 
       console.log(
         `[docker] 容器 ${this.containerName} 策略不匹配，按 kernel 重建 ` +
-        `(network=${this.networkMode}, sandbox=${this.sandboxPreset})`
+        `(network=${this.networkMode}, sandbox=${this.sandboxPreset}, ports=${publishPorts.join(',') || '-'})`
       );
       try {
         if (existing.State === 'running') await container.stop({ t: 5 });
@@ -347,12 +370,13 @@ done
       }
       await container.remove({ force: true });
       this.container = null;
+      this.portMap = {};
       this.workspaceReady = false;
     }
 
     console.log(
       `[docker] 创建并启动新容器 ${this.containerName} ` +
-      `(kernel=${this.kernelId || 'default'}, network=${this.networkMode}, sandbox=${this.sandboxPreset})`
+      `(kernel=${this.kernelId || 'default'}, network=${this.networkMode}, sandbox=${this.sandboxPreset}, ports=${publishPorts.join(',') || '-'})`
     );
     const hostConfig = {
       AutoRemove: false,
@@ -362,7 +386,17 @@ done
       hostConfig.SecurityOpt = ['no-new-privileges:true'];
     }
 
-    const container = await this.docker.createContainer({
+    let exposedPorts;
+    if (publishPorts.length && this.networkMode !== 'none') {
+      const allocated = await allocatePortBindings(publishPorts);
+      hostConfig.PortBindings = allocated.portBindings;
+      exposedPorts = allocated.exposedPorts;
+      this.portMap = allocated.portMap;
+    } else {
+      this.portMap = {};
+    }
+
+    const createOpts = {
       name: this.containerName,
       Hostname: 'tutorial',
       Image: this.image,
@@ -371,7 +405,10 @@ done
       OpenStdin: true,
       Labels: desired,
       HostConfig: hostConfig,
-    });
+    };
+    if (exposedPorts) createOpts.ExposedPorts = exposedPorts;
+
+    const container = await this.docker.createContainer(createOpts);
     await container.start();
     this.workspaceReady = false;
     return container;
@@ -427,12 +464,13 @@ function pickSandboxPreset(kernel) {
   return 'none';
 }
 
-function desiredContainerLabels({ kernelId, image, networkMode, sandboxPreset }) {
+function desiredContainerLabels({ kernelId, image, networkMode, sandboxPreset, publishPorts = [] }) {
   return {
     'multilab.kernel.id': String(kernelId || ''),
     'multilab.image': String(image || ''),
     'multilab.network': String(networkMode || ''),
     'multilab.sandbox': String(sandboxPreset || ''),
+    'multilab.publish': normalizePublishPorts(publishPorts).join(',') || '-',
   };
 }
 

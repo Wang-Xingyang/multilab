@@ -14,7 +14,7 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 
 import { normalizePanels, FALLBACK_PANELS } from '../server/services/PanelModel.js';
-import { createDefaultKernelRegistry } from '../server/services/KernelRegistry.js';
+import { createDefaultKernelRegistry, packageNeedsNetwork } from '../server/services/KernelRegistry.js';
 import { PackageService } from '../server/services/PackageService.js';
 import { SaveService } from '../server/services/SaveService.js';
 import { MlabSaveArchiveService } from '../server/services/MlabSaveArchiveService.js';
@@ -22,6 +22,11 @@ import { KernelSelectionStore } from '../server/services/KernelSelectionStore.js
 import { sanitizeUploadFilename } from '../server/services/TempArchiveUpload.js';
 import { SecurityPolicyService } from '../server/services/SecurityPolicyService.js';
 import { TrustStore } from '../server/services/TrustStore.js';
+import {
+  normalizePublishPorts,
+  rewritePreviewUrl,
+  buildPreviewMeta,
+} from '../server/services/PreviewPortMap.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -50,12 +55,13 @@ await test('PanelModel falls back when panels missing', () => {
   assert.equal(result.has.terminal, true);
 });
 
-await test('PanelModel keeps hello-c test-results panel', async () => {
+await test('PanelModel keeps hello-c test-results and file-tree panels', async () => {
   const manifest = JSON.parse(
     await fs.readFile(path.join(TUTORIALS_DIR, 'hello-c', 'multilab.json'), 'utf8')
   );
   const result = normalizePanels(manifest.default_panels);
   assert.equal(result.has['test-results'], true);
+  assert.equal(result.has['file-tree'], true);
   const testPanel = result.panels.find(p => p.type === 'test-results');
   assert.ok(testPanel);
   assert.equal(testPanel.hidden, true);
@@ -175,6 +181,39 @@ await test('SecurityPolicyService allows default hello-c path', async () => {
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
+});
+
+await test('PreviewPortMap rewrites container URLs via host map', () => {
+  assert.deepEqual(normalizePublishPorts([8080, '3000', 8080, 'x']), [8080, 3000]);
+  assert.equal(
+    rewritePreviewUrl('http://0.0.0.0:8080/app', { 8080: 54321 }),
+    'http://127.0.0.1:54321/app'
+  );
+  const meta = buildPreviewMeta('ready\nMULTILAB_PREVIEW_URL=http://127.0.0.1:5173/\n', { 5173: 19090 });
+  assert.equal(meta.preview_url, 'http://127.0.0.1:19090/');
+  assert.equal(meta.preview_advertised_url, 'http://127.0.0.1:5173/');
+});
+
+await test('KernelRegistry picks net kernel when network/preview ports required', () => {
+  const registry = createDefaultKernelRegistry({
+    image: 'multilab/os:latest',
+    workspaceDir: '/home/student/workspace',
+  });
+  assert.equal(packageNeedsNetwork({ security: { preview_ports: [8080] } }), true);
+  const netPkg = {
+    runtime_requirements: { platform: 'linux', capabilities: ['tty'], commands: { gcc: '>=13' } },
+    security: { network_required: true },
+  };
+  const resolved = registry.resolveForPackage(netPkg);
+  assert.equal(resolved.selected.id, 'gcc-ubuntu24-docker-net');
+  assert.equal(resolved.network_required, true);
+  assert.ok(resolved.selected.publish_ports.includes(8080));
+  const offline = registry.resolveForPackage({
+    recommended_kernel: 'gcc-ubuntu24-docker',
+    runtime_requirements: netPkg.runtime_requirements,
+    security: { network_required: false },
+  });
+  assert.equal(offline.selected.id, 'gcc-ubuntu24-docker');
 });
 
 console.log('');

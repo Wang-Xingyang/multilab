@@ -1,3 +1,6 @@
+import { packageNeedsNetwork } from './KernelRegistry.js';
+import { normalizePublishPorts } from './PreviewPortMap.js';
+
 export class SecurityPolicyService {
   constructor({ packageService, trustStore, kernelRegistry, kernelSelectionStore = null }) {
     this.packageService = packageService;
@@ -37,7 +40,7 @@ export class SecurityPolicyService {
       );
     }
 
-    const networkRequired = security.network_required === true;
+    const networkRequired = packageNeedsNetwork(pkg);
     if (!networkRequired && selectedKernel.network_default !== 'none') {
       throw Object.assign(
         new Error('Package requires network-disabled execution before commands can run'),
@@ -46,7 +49,7 @@ export class SecurityPolicyService {
     }
     if (networkRequired && selectedKernel.network_default === 'none') {
       throw Object.assign(
-        new Error('Package requires network access, but the selected kernel does not allow it'),
+        new Error('Package requires network or preview ports, but the selected kernel does not allow it'),
         { statusCode: 409 }
       );
     }
@@ -56,6 +59,7 @@ export class SecurityPolicyService {
       trust,
       kernel: selectedKernel,
       resolution,
+      preview_ports: normalizePublishPorts(security.preview_ports || selectedKernel.publish_ports || []),
     };
   }
 }

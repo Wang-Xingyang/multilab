@@ -9,30 +9,41 @@ export class KernelRegistry {
 
   resolveForPackage(pkg, { preferredKernelId = null } = {}) {
     const requirements = pkg.runtime_requirements || {};
+    const networkRequired = packageNeedsNetwork(pkg);
     const candidates = this.kernels
-      .map(kernel => ({
-        kernel,
-        match: kernelMatchesRequirements(kernel, requirements),
-        recommended: Boolean(pkg.recommended_kernel && kernel.id === pkg.recommended_kernel),
-      }))
+      .map(kernel => {
+        const match = kernelMatchesRequirements(kernel, requirements);
+        const networkOk = networkRequired
+          ? kernel.network_default !== 'none'
+          : kernel.network_default === 'none';
+        return {
+          kernel,
+          match,
+          networkOk,
+          recommended: Boolean(pkg.recommended_kernel && kernel.id === pkg.recommended_kernel),
+          compatible: match.ok && networkOk,
+        };
+      })
       .sort((a, b) => Number(b.recommended) - Number(a.recommended));
 
     const preferred = preferredKernelId
-      ? candidates.find(candidate => candidate.kernel.id === preferredKernelId && candidate.match.ok)
+      ? candidates.find(candidate => candidate.kernel.id === preferredKernelId && candidate.compatible)
       : null;
     const selected = preferred
-      || candidates.find(candidate => candidate.recommended && candidate.match.ok)
-      || candidates.find(candidate => candidate.match.ok)
+      || candidates.find(candidate => candidate.recommended && candidate.compatible)
+      || candidates.find(candidate => candidate.compatible)
       || null;
 
     return {
       selected: selected ? selected.kernel : null,
       preferred_kernel_id: preferredKernelId || null,
       preferred_applied: Boolean(preferred),
+      network_required: networkRequired,
       candidates: candidates.map(candidate => ({
         ...candidate.kernel,
         recommended: candidate.recommended,
-        compatible: candidate.match.ok,
+        compatible: candidate.compatible,
+        network_ok: candidate.networkOk,
         missing_capabilities: candidate.match.missingCapabilities,
         missing_commands: candidate.match.missingCommands,
         version_mismatches: candidate.match.versionMismatches,
@@ -42,26 +53,44 @@ export class KernelRegistry {
   }
 }
 
+export function packageNeedsNetwork(pkg) {
+  const security = pkg?.security || {};
+  if (security.network_required === true) return true;
+  const previewPorts = security.preview_ports;
+  return Array.isArray(previewPorts) && previewPorts.length > 0;
+}
+
 export function createDefaultKernelRegistry({ image, workspaceDir }) {
+  const base = {
+    provider: 'docker',
+    image,
+    user: 'student',
+    workspace: workspaceDir,
+    platform: 'linux',
+    capabilities: ['tty', 'compile', 'debug', 'signals', 'sandbox'],
+    commands: {
+      gcc: '13.3.0',
+      gdb: '15.0.0',
+      bash: '5.2.0',
+      make: '4.3.0',
+    },
+    sandbox_presets: ['standard'],
+  };
   return new KernelRegistry({
     kernels: [
       {
+        ...base,
         id: 'gcc-ubuntu24-docker',
         display_name: 'GCC Ubuntu 24.04 (Docker)',
-        provider: 'docker',
-        image,
-        user: 'student',
-        workspace: workspaceDir,
-        platform: 'linux',
-        capabilities: ['tty', 'compile', 'debug', 'signals', 'sandbox'],
-        commands: {
-          gcc: '13.3.0',
-          gdb: '15.0.0',
-          bash: '5.2.0',
-          make: '4.3.0',
-        },
-        sandbox_presets: ['standard'],
         network_default: 'none',
+      },
+      {
+        ...base,
+        id: 'gcc-ubuntu24-docker-net',
+        display_name: 'GCC Ubuntu 24.04 + preview ports (Docker)',
+        network_default: 'bridge',
+        // Host binds these container ports to 127.0.0.1 ephemeral ports.
+        publish_ports: [8080, 3000, 5173, 8000],
       },
     ],
   });

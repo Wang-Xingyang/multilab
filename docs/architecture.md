@@ -209,7 +209,9 @@ Current UI behavior:
 - `test-results` opens a right-hand aux panel when a captured test/check runs (even if the panel starts `hidden`);
 - `web-preview` opens the same aux area for `type: "preview"` commands;
 - captured preview output may include `MULTILAB_PREVIEW_HTML` or HTML body for sandboxed `iframe.srcdoc` rendering;
-- `MULTILAB_PREVIEW_URL=...` is displayed as text for now because Docker port mapping is not implemented under the default network-disabled kernel.
+- `MULTILAB_PREVIEW_URL=...` is rewritten to a host-local mapped URL when the active Docker kernel publishes that container port (`publish_ports`, bound to `127.0.0.1`); otherwise it remains text with guidance to use `gcc-ubuntu24-docker-net` and `security.network_required` / `security.preview_ports`.
+- Packages that need network or preview ports resolve to `gcc-ubuntu24-docker-net` (bridge + sandbox + published ports). Offline packages still require `network_default: none`.
+- `file-tree` panels render a center-left tree from `GET /api/fs/ls?tree=1` (workspace-scoped).
 
 ## Terminal Model
 
@@ -385,5 +387,5 @@ The UI shows a kernel selector for compatible candidates and a "重连终端" bu
 - Kernel registry is static and only contains the default Docker kernel.
 - Runtime selection follows resolved kernel plus optional per-package user preference; only one Docker kernel is registered today.
 - Package library management covers list/detail/open/delete; bulk cleanup and save-linked cleanup are not implemented.
-- Panel declarations drive tutorial/terminal visibility and a right-hand aux panel for `test-results` / `web-preview`. Full file-tree/logs/diagnostics panels and Docker port-mapped live web preview are not implemented yet.
+- Panel declarations drive tutorial/terminal/file-tree visibility and a right-hand aux panel for `test-results` / `web-preview`. Live host-mapped preview works for published ports; background long-running preview processes and logs/diagnostics panels are still open.
 - The Docker container is single-session and intended for local single-user use.

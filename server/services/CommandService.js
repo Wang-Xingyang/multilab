@@ -1,4 +1,5 @@
 import { validateSafePath } from './PackageService.js';
+import { buildPreviewMeta } from './PreviewPortMap.js';
 
 export class CommandService {
   constructor({
@@ -37,13 +38,19 @@ export class CommandService {
     const progress = commandSpec.command.type === 'test' && this.saveService
       ? await this.saveService.recordTestResult(tutorial, step, passed)
       : null;
+    const output = (result.stdout + (result.stderr ? '\n' + result.stderr : '')).trim();
+    const portMap = typeof session.getPortMap === 'function' ? session.getPortMap() : {};
+    const previewMeta = commandSpec.command.type === 'preview'
+      ? buildPreviewMeta(output, portMap)
+      : {};
     return {
       command,
       exitCode: result.exitCode,
       passed,
-      output: (result.stdout + (result.stderr ? '\n' + result.stderr : '')).trim(),
+      output,
       kernel: auth?.kernel ? { id: auth.kernel.id, provider: auth.kernel.provider } : undefined,
       ...(progress ? { progress } : {}),
+      ...previewMeta,
     };
   }
 

@@ -161,6 +161,7 @@ app.get('/api/kernels/resolve', async (req, res) => {
         provider: resolution.selected.provider,
         network_mode: plan?.networkMode || null,
         sandbox_preset: plan?.sandboxPreset || null,
+        publish_ports: plan?.publishPorts || [],
         image: plan?.image || resolution.selected.image || null,
         active: Boolean(active && active.id === resolution.selected.id),
         active_kernel_id: active?.id || null,
@@ -175,10 +176,21 @@ app.get('/api/kernels/resolve', async (req, res) => {
 app.get('/api/runtime', async (req, res) => {
   try {
     const active = runtimeManager.getActiveKernel();
+    let portMap = {};
+    let sessionReady = false;
+    try {
+      const session = runtimeManager.getSession();
+      sessionReady = Boolean(session);
+      portMap = typeof session.getPortMap === 'function' ? session.getPortMap() : {};
+    } catch {
+      sessionReady = false;
+    }
     res.json({
       providers: runtimeManager.listProviders(),
       active_kernel: active,
       active_fingerprint: runtimeManager.activeFingerprint,
+      session_ready: sessionReady,
+      port_map: portMap,
     });
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message });
@@ -206,6 +218,7 @@ app.post('/api/runtime/select', async (req, res) => {
         provider: selected.kernel.provider,
         network_mode: plan?.networkMode || null,
         sandbox_preset: plan?.sandboxPreset || null,
+        publish_ports: plan?.publishPorts || [],
         image: plan?.image || selected.kernel.image || null,
         active: true,
         active_kernel_id: selected.kernel.id,
@@ -419,17 +432,55 @@ async function containerExec(cmdArray, opts = {}) {
   return getRuntimeSession().exec(cmdArray, opts);
 }
 
-// 列出工作区文件
+// 列出工作区文件（默认扁平文件；tree=1 时返回有限深度目录树）
 app.get('/api/fs/ls', async (req, res) => {
   try {
     const dir = validateContainerPath(req.query.path || WORKSPACE_DIR);
-    const r = await containerExec(['find', dir, '-maxdepth', '1', '-mindepth', '1', '-type', 'f', '-printf', '%f\n'], { cwd: '/' });
-    if (r.exitCode !== 0) return res.status(500).json({ error: r.stderr || 'ls failed' });
-    const files = r.stdout.trim().split('\n').filter(Boolean).map(name => {
-      validateFileName(name);
-      return { name, type: 'file' };
+    const wantTree = req.query.tree === '1' || req.query.tree === 'true';
+    if (!wantTree) {
+      const r = await containerExec(
+        ['find', dir, '-maxdepth', '1', '-mindepth', '1', '-type', 'f', '-printf', '%f\n'],
+        { cwd: '/' }
+      );
+      if (r.exitCode !== 0) return res.status(500).json({ error: r.stderr || 'ls failed' });
+      const files = r.stdout.trim().split('\n').filter(Boolean).map(name => {
+        validateFileName(name);
+        return { name, type: 'file' };
+      });
+      return res.json({ path: dir, files });
+    }
+
+    const maxDepth = Math.min(6, Math.max(1, Number(req.query.depth) || 4));
+    const r = await containerExec(
+      [
+        'find', dir, '-maxdepth', String(maxDepth), '-mindepth', '1',
+        '(', '-type', 'f', '-o', '-type', 'd', ')',
+        '-printf', '%y\t%P\n',
+      ],
+      { cwd: '/' }
+    );
+    if (r.exitCode !== 0) return res.status(500).json({ error: r.stderr || 'ls tree failed' });
+    const entries = [];
+    for (const line of r.stdout.trim().split('\n').filter(Boolean)) {
+      const tab = line.indexOf('\t');
+      if (tab < 0) continue;
+      const kind = line.slice(0, tab);
+      const rel = line.slice(tab + 1);
+      if (!rel || rel.includes('\0') || rel.split('/').some(part => part === '..')) continue;
+      const abs = path.posix.join(dir, rel);
+      validateContainerPath(abs);
+      entries.push({
+        name: path.posix.basename(rel),
+        path: abs,
+        relative: rel,
+        type: kind === 'd' ? 'dir' : 'file',
+      });
+    }
+    entries.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+      return a.relative.localeCompare(b.relative);
     });
-    res.json({ path: dir, files });
+    res.json({ path: dir, tree: true, depth: maxDepth, entries });
   } catch (e) { res.status(e.statusCode || 500).json({ error: e.message }); }
 });
 
