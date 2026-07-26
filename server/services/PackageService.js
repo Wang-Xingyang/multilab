@@ -313,6 +313,21 @@ export class PackageService {
         record,
       }));
   }
+
+  async findSourceByPackageIdentity({ id, version, digest }) {
+    const packageId = String(id || '');
+    const packageVersion = String(version || '0.0.0');
+    const packageDigest = String(digest || '');
+    if (!packageId || !packageDigest) {
+      throw Object.assign(new Error('package id and digest required'), { statusCode: 400 });
+    }
+    const tutorials = await this.listTutorialSummaries();
+    return tutorials.find(tutorial => (
+      tutorial.package_id === packageId
+      && (tutorial.version || '0.0.0') === packageVersion
+      && tutorial.package_digest === packageDigest
+    )) || null;
+  }
 }
 
 export function packageSourceKey(record) {

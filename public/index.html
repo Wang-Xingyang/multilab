@@ -233,6 +233,8 @@
   <div class="brand">Multi<span class="dot">·</span>Lab</div>
   <select id="tutorial-select"><option value="">加载中...</option></select>
   <button id="import-package-btn" title="导入本机 .mlab 文件">导入 .mlab</button>
+  <button id="export-save-btn" title="导出当前进度为 .mlab-save" disabled>导出进度</button>
+  <button id="import-save-btn" title="导入本机 .mlab-save 进度">导入进度</button>
   <button id="trust-btn" title="当前 package trust 状态" disabled>未加载</button>
   <div class="spacer"></div>
   <button id="theme-btn" title="切换主题">
@@ -366,10 +368,12 @@ function status(msg) {
 
 function renderTrustButton() {
   const btn = document.getElementById('trust-btn');
+  const exportBtn = document.getElementById('export-save-btn');
   if (!currentTutorial?.package_digest) {
     btn.textContent = '未加载';
     btn.title = '当前 package trust 状态';
     btn.disabled = true;
+    exportBtn.disabled = true;
     return;
   }
   const trust = currentTutorial.trust || 'untrusted';
@@ -377,6 +381,7 @@ function renderTrustButton() {
   btn.textContent = isTrusted ? '已信任' : '未信任';
   btn.title = `${currentTutorial.trust_default ? '默认' : '用户设置'} trust: ${trust}`;
   btn.disabled = false;
+  exportBtn.disabled = false;
 }
 
 async function toggleCurrentPackageTrust() {
@@ -610,7 +615,12 @@ async function apiJson(url, body) {
     body: JSON.stringify(body),
   });
   const payload = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(payload.error || `HTTP ${res.status}`);
+    err.code = payload.code;
+    err.package = payload.package;
+    throw err;
+  }
   return payload;
 }
 
@@ -669,6 +679,48 @@ async function importPackageFromPath() {
     toast('已导入 .mlab');
   } catch (e) {
     toast('导入失败: ' + e.message, true);
+  }
+}
+
+function defaultSaveExportPath() {
+  if (!currentTutorial) return '';
+  const id = currentTutorial.package_id || currentTutorial.id || 'tutorial';
+  const version = currentTutorial.version || '0.0.0';
+  return `/tmp/${id}-${version}.mlab-save`;
+}
+
+async function exportSaveFromPath() {
+  if (!currentTutorial) return;
+  const tutorialKey = currentTutorial.source_key || currentTutorial.id;
+  const outputPath = prompt('输入导出 .mlab-save 的本机路径。', defaultSaveExportPath());
+  if (!outputPath || !outputPath.trim()) return;
+  try {
+    await saveCurrentStep({ silent: true });
+    status('导出进度...');
+    const result = await apiJson('/api/saves/export', {
+      tutorial: tutorialKey,
+      path: outputPath.trim(),
+    });
+    toast(`已导出进度: ${result.path}`);
+  } catch (e) {
+    toast('导出进度失败: ' + e.message, true);
+  }
+}
+
+async function importSaveFromPath() {
+  const archivePath = prompt('输入本机 .mlab-save 文件路径。后端会按此路径读取文件。', '');
+  if (!archivePath || !archivePath.trim()) return;
+  try {
+    status('导入进度...');
+    const result = await apiJson('/api/saves/import', { path: archivePath.trim() });
+    await loadTutorialList({ preferredKey: result.source_key });
+    toast('已导入进度');
+  } catch (e) {
+    if (e.code === 'package_missing' || /matching package not found/.test(e.message || '')) {
+      toast('缺少对应教程包，请先导入原 .mlab: ' + e.message, true);
+      return;
+    }
+    toast('导入进度失败: ' + e.message, true);
   }
 }
 
@@ -916,6 +968,8 @@ document.getElementById('file-picker-overlay').addEventListener('click', (e) => 
 document.getElementById('picker-refresh-btn').addEventListener('click', () => loadFilePickerList(true));
 document.getElementById('tab-open-btn').addEventListener('click', openFilePicker);
 document.getElementById('import-package-btn').addEventListener('click', importPackageFromPath);
+document.getElementById('export-save-btn').addEventListener('click', exportSaveFromPath);
+document.getElementById('import-save-btn').addEventListener('click', importSaveFromPath);
 document.getElementById('trust-btn').addEventListener('click', toggleCurrentPackageTrust);
 document.getElementById('save-btn').addEventListener('click', saveFile);
 document.getElementById('revert-btn').addEventListener('click', resetCurrentStep);

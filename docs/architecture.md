@@ -39,6 +39,7 @@ Node host
   PackageService
   PackageLibrary
   SaveService
+  MlabSaveArchiveService
   CommandService
   SecurityPolicyService
   TrustStore
@@ -246,6 +247,22 @@ multilab/.multilab-state/saves/<id>/<version>/<digest>/save.json
 
 Current metadata tracks package identity, `current_step`, visited steps, test pass/fail state per step, and `updated_at`. Step load/save/reset records the current step as visited. Captured commands with `type: "test"` update `test_passed[step]`.
 
+Learner saves can be exported and imported as `.mlab-save` ZIP archives through `MlabSaveArchiveService`:
+
+```text
+POST /api/saves/export { tutorial, path }
+POST /api/saves/import { path }
+```
+
+Archive layout:
+
+```text
+save.json
+steps/<step-id>/files/<file>
+```
+
+The archive references package `id` / `version` / `digest` and does not embed the tutorial package. Import requires a matching development or installed package source; if none exists, the API returns `code: "package_missing"` and asks the user to import the original `.mlab` first. The current UI accepts local host paths for export/import, matching the `.mlab` import prototype.
+
 The final product storage root is documented in the root spec:
 
 ```text
@@ -318,6 +335,8 @@ The resolver currently checks required platform, capabilities, command names, an
 
 - Docker is still the only implemented provider.
 - `.mlab` pack/unpack CLI and local path import API are implemented; browser upload/open-from-archive is not implemented.
+- `.mlab-save` export/import is implemented for local host paths; browser upload/download is not implemented.
 - Kernel registry is static and only contains the default Docker kernel.
+- Runtime provider selection is not yet driven by the selected kernel.
 - Panel declarations are present in manifests but not fully rendered dynamically.
 - The Docker container is single-session and not suitable for multi-user deployment.

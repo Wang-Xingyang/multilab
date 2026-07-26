@@ -142,7 +142,14 @@ Step saves are stored by package identity:
 .multilab-state/saves/<id>/<version>/<digest>/save.json
 ```
 
-`save.json` currently tracks `current_step`, `visited`, `test_passed`, and `updated_at`. `.mlab-save` export/import is not implemented yet.
+`save.json` currently tracks `current_step`, `visited`, `test_passed`, and `updated_at`. Progress can be exported/imported as a `.mlab-save` archive through the UI or:
+
+```text
+POST /api/saves/export { tutorial, path }
+POST /api/saves/import { path }
+```
+
+Import matches package `id` / `version` / `digest`. If the package is missing, import returns `package_missing` and the original `.mlab` must be imported first.
 
 ## Checks
 

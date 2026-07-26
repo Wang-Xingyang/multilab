@@ -21,6 +21,7 @@ import { CommandService } from './services/CommandService.js';
 import { TrustStore } from './services/TrustStore.js';
 import { createDefaultKernelRegistry } from './services/KernelRegistry.js';
 import { MlabArchiveService } from './services/MlabArchiveService.js';
+import { MlabSaveArchiveService } from './services/MlabSaveArchiveService.js';
 import { PackageLibrary } from './services/PackageLibrary.js';
 import { SecurityPolicyService } from './services/SecurityPolicyService.js';
 
@@ -64,6 +65,7 @@ const saveService = new SaveService({
   runtimeSession,
   packageService,
 });
+const saveArchiveService = new MlabSaveArchiveService({ saveService });
 const trustStore = new TrustStore({ runtimeStateDir: RUNTIME_STATE_DIR });
 const kernelRegistry = createDefaultKernelRegistry({
   image: EXEC_IMAGE,
@@ -152,6 +154,32 @@ app.post('/api/packages/import', async (req, res) => {
     res.json(await packageLibrary.importArchive(packagePath));
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message });
+  }
+});
+
+app.post('/api/saves/export', async (req, res) => {
+  try {
+    const { tutorial, path: outputPath } = req.body;
+    if (!tutorial || !outputPath) {
+      return res.status(400).json({ error: 'tutorial and path required' });
+    }
+    res.json(await saveArchiveService.exportArchive(tutorial, outputPath));
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message, code: e.code, package: e.package });
+  }
+});
+
+app.post('/api/saves/import', async (req, res) => {
+  try {
+    const { path: archivePath } = req.body;
+    if (!archivePath) return res.status(400).json({ error: 'path required' });
+    res.json(await saveArchiveService.importArchive(archivePath));
+  } catch (e) {
+    res.status(e.statusCode || 500).json({
+      error: e.message,
+      code: e.code || undefined,
+      package: e.package || undefined,
+    });
   }
 });
 

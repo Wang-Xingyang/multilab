@@ -121,8 +121,12 @@ export class SaveService {
   }
 
   async ensureRuntimeDirs() {
-    await fs.mkdir(path.join(this.runtimeStateDir, 'saves'), { recursive: true });
+    await this.ensureSaveRootDirs();
     await this.runtimeSession.ensureWorkspace();
+  }
+
+  async ensureSaveRootDirs() {
+    await fs.mkdir(path.join(this.runtimeStateDir, 'saves'), { recursive: true });
   }
 
   saveDir(cfg, stepId) {
@@ -200,6 +204,104 @@ export class SaveService {
 
   saveMetadataPath(cfg) {
     return path.join(this.packageSaveRoot(cfg), 'save.json');
+  }
+
+  async collectSaveBundle(tutorialKey) {
+    validateSafePath(tutorialKey);
+    await this.ensureSaveRootDirs();
+    const cfg = await this.packageService.loadTutorial(tutorialKey);
+    const metadata = await this.readSaveMetadata(cfg);
+    const root = this.packageSaveRoot(cfg);
+    const files = new Map();
+    files.set('save.json', Buffer.from(JSON.stringify(metadata, null, 2) + '\n', 'utf8'));
+
+    const stepsRoot = path.join(root, 'steps');
+    for (const stepId of await listStepIds(stepsRoot)) {
+      validateSafePath(stepId);
+      const filesDir = path.join(stepsRoot, stepId, 'files');
+      if (!(await dirExists(filesDir))) continue;
+      const stepFiles = await readHostFiles(filesDir);
+      for (const file of stepFiles) {
+        files.set(`steps/${stepId}/files/${file.name}`, Buffer.from(file.content || '', 'utf8'));
+      }
+    }
+
+    return {
+      tutorial: tutorialKey,
+      source_key: cfg.source_key || tutorialKey,
+      package: metadata.package,
+      metadata,
+      files,
+    };
+  }
+
+  async applySaveBundle({ metadata, files }) {
+    const packageInfo = metadata?.package;
+    if (!packageInfo?.id || !packageInfo?.digest) {
+      throw Object.assign(new Error('save.json missing package identity'), { statusCode: 400 });
+    }
+
+    const match = await this.packageService.findSourceByPackageIdentity({
+      id: packageInfo.id,
+      version: packageInfo.version || '0.0.0',
+      digest: packageInfo.digest,
+    });
+    if (!match) {
+      throw Object.assign(
+        new Error(
+          `matching package not found: ${packageInfo.id}@${packageInfo.version || '0.0.0'}@${packageInfo.digest}; import the original .mlab first`
+        ),
+        {
+          statusCode: 404,
+          code: 'package_missing',
+          package: {
+            id: packageInfo.id,
+            version: packageInfo.version || '0.0.0',
+            digest: packageInfo.digest,
+          },
+        }
+      );
+    }
+
+    const cfg = await this.packageService.loadTutorial(match.source_key || match.id);
+    const root = this.packageSaveRoot(cfg);
+    await fs.rm(root, { recursive: true, force: true });
+    await fs.mkdir(root, { recursive: true });
+
+    const stepFiles = new Map();
+    for (const [relPath, content] of files || []) {
+      if (relPath === 'save.json') continue;
+      const parsed = parseSaveStepFilePath(relPath);
+      if (!parsed) {
+        throw Object.assign(new Error(`unsupported save archive path: ${relPath}`), { statusCode: 400 });
+      }
+      if (!stepFiles.has(parsed.stepId)) stepFiles.set(parsed.stepId, []);
+      stepFiles.get(parsed.stepId).push({
+        name: parsed.fileName,
+        content: Buffer.isBuffer(content) ? content.toString('utf8') : String(content || ''),
+      });
+    }
+
+    for (const [stepId, stepFileList] of stepFiles) {
+      const dest = this.saveDir(cfg, stepId);
+      await writeHostFiles(dest, stepFileList);
+    }
+
+    const progress = await this.writeSaveMetadata(cfg, {
+      ...defaultSaveMetadata(cfg),
+      current_step: metadata.current_step || null,
+      visited: Array.isArray(metadata.visited) ? metadata.visited : [],
+      test_passed: metadata.test_passed && typeof metadata.test_passed === 'object'
+        ? metadata.test_passed
+        : {},
+    });
+
+    return {
+      source_key: cfg.source_key || match.source_key || match.id,
+      package: progress.package,
+      progress,
+      steps: Array.from(stepFiles.keys()).sort(),
+    };
   }
 
   async loadWorkspaceFiles() {
@@ -304,6 +406,25 @@ function defaultSaveMetadata(cfg) {
     visited: [],
     test_passed: {},
     updated_at: null,
+  };
+}
+
+async function listStepIds(stepsRoot) {
+  try {
+    const entries = await fs.readdir(stepsRoot, { withFileTypes: true });
+    return entries.filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
+  } catch (e) {
+    if (e.code === 'ENOENT') return [];
+    throw e;
+  }
+}
+
+function parseSaveStepFilePath(relPath) {
+  const match = String(relPath || '').match(/^steps\/([^/]+)\/files\/([^/]+)$/);
+  if (!match) return null;
+  return {
+    stepId: validateSafePath(match[1]),
+    fileName: validateFileName(match[2]),
   };
 }
 
