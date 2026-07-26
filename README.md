@@ -131,7 +131,7 @@ Imported `.mlab` packages are unpacked under:
 .multilab-state/packages/<id>/<version>/<digest>/unpacked/
 ```
 
-They appear in `/api/tutorials` with a digest-derived `source_key` such as `pkg-<sha256hex>`. The UI "打开 .mlab" button uploads a browser-selected file to `POST /api/packages/upload`, imports it into the library, and opens it. Host-path import via `POST /api/packages/import` remains available for automation.
+They appear in `/api/tutorials` with a digest-derived `source_key` such as `pkg-<sha256hex>`. The UI "打开 .mlab" button uploads a browser-selected file to `POST /api/packages/upload`, imports it into the library, and opens it. The "教程库" panel lists installed packages (version/digest/source) and can open or delete them. Host-path import via `POST /api/packages/import` remains available for automation.
 
 Trust is keyed by package digest and defaults to `untrusted`. The UI can toggle `untrusted` / `user-trusted` through `/api/trust`. Command execution is gated by `SecurityPolicyService`: untrusted or sandbox-required packages need a sandbox-capable kernel, and network-disabled packages require a kernel with `network_default: none`.
 

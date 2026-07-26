@@ -131,9 +131,12 @@ Imported packages are unpacked under:
 ```text
 POST /api/packages/import { path }          # host-local path (API/dev)
 POST /api/packages/upload                  # browser raw .mlab body + X-Filename
+GET  /api/packages                          # list installed packages
+GET  /api/packages/item?id&version&digest   # package detail
+DELETE /api/packages/item?id&version&digest # remove installed package
 ```
 
-The UI "打开 .mlab" button uses browser file picker upload, imports into the package library, then opens the installed source by digest. Host-path import remains available for API/automation.
+The UI "打开 .mlab" button uses browser file picker upload, imports into the package library, then opens the installed source by digest. The "教程库" panel lists installed packages with version/digest/source, and supports open/delete. Deleting a package does not delete learner saves. Host-path import remains available for API/automation.
 
 Imported packages are now included in `/api/tutorials` alongside development tutorials and can be opened by the player through their `source_key`.
 
@@ -364,5 +367,6 @@ The resolver currently checks required platform, capabilities, command names, an
 - `.mlab-save` host-path export/import and browser upload/download are implemented.
 - Kernel registry is static and only contains the default Docker kernel.
 - Runtime selection is automatic from the resolved kernel; there is no user kernel picker yet.
+- Package library management covers list/detail/open/delete; bulk cleanup and save-linked cleanup are not implemented.
 - Panel declarations are present in manifests but not fully rendered dynamically.
 - The Docker container is single-session and not suitable for multi-user deployment.

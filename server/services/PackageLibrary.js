@@ -1,5 +1,6 @@
 import path from 'path';
 import fs from 'fs/promises';
+import { packageSourceKey } from './PackageService.js';
 
 export class PackageLibrary {
   constructor({ libraryDir, archiveService }) {
@@ -22,11 +23,45 @@ export class PackageLibrary {
           if (!digestEntry.isDirectory()) continue;
           const root = path.join(this.libraryDir, id, version, digestEntry.name);
           const lock = await readJson(path.join(root, 'package.lock.json')).catch(() => null);
-          if (lock) records.push(lock);
+          if (lock) records.push(this.annotateRecord(lock, root));
         }
       }
     }
     return records.sort((a, b) => `${a.id}@${a.version}`.localeCompare(`${b.id}@${b.version}`));
+  }
+
+  async getPackage({ id, version, digest }) {
+    const root = this.packageRoot({ id, version, digest });
+    const lock = await readJson(path.join(root, 'package.lock.json')).catch(e => {
+      if (e.code === 'ENOENT') {
+        throw Object.assign(new Error('package not found'), { statusCode: 404 });
+      }
+      throw e;
+    });
+    return this.annotateRecord(lock, root);
+  }
+
+  async deletePackage({ id, version, digest }) {
+    const root = this.packageRoot({ id, version, digest });
+    if (!(await pathExists(root))) {
+      throw Object.assign(new Error('package not found'), { statusCode: 404 });
+    }
+    const record = await this.getPackage({ id, version, digest }).catch(() => ({
+      id,
+      version,
+      digest,
+      source_key: packageSourceKey({ digest }),
+    }));
+
+    await fs.rm(root, { recursive: true, force: true });
+    await removeEmptyParents(root, this.libraryDir);
+    return {
+      deleted: true,
+      id: record.id,
+      version: record.version,
+      digest: record.digest,
+      source_key: record.source_key,
+    };
   }
 
   async importArchive(packagePath, opts = {}) {
@@ -55,7 +90,27 @@ export class PackageLibrary {
       unpacked_dir: unpackedDir,
     };
     await fs.writeFile(lockPath, JSON.stringify(record, null, 2) + '\n', 'utf8');
-    return record;
+    return this.annotateRecord(record, packageRoot);
+  }
+
+  packageRoot({ id, version, digest }) {
+    const packageId = validateStorageSegment(id, 'package id');
+    const packageVersion = validateStorageSegment(version || '0.0.0', 'package version');
+    const digestSegment = digestPathSegment(digest);
+    const root = path.resolve(this.libraryDir, packageId, packageVersion, digestSegment);
+    if (root !== this.libraryDir && !root.startsWith(this.libraryDir + path.sep)) {
+      throw Object.assign(new Error('Invalid package path'), { statusCode: 400 });
+    }
+    return root;
+  }
+
+  annotateRecord(record, root = null) {
+    return {
+      ...record,
+      source_key: packageSourceKey(record),
+      source_type: 'installed',
+      package_root: root || record.package_root || null,
+    };
   }
 }
 
@@ -94,6 +149,18 @@ async function pathExists(filePath) {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function removeEmptyParents(startDir, stopDir) {
+  let current = path.dirname(startDir);
+  const stop = path.resolve(stopDir);
+  while (current.startsWith(stop + path.sep) || current === stop) {
+    if (current === stop) break;
+    const entries = await safeReadDir(current);
+    if (entries.length > 0) break;
+    await fs.rmdir(current).catch(() => {});
+    current = path.dirname(current);
   }
 }
 

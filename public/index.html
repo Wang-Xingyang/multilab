@@ -225,6 +225,32 @@
   .picker-body .file-empty { padding: 16px; text-align: center; color: var(--text-dim); font-size: 13px; }
   .picker-refresh { background: none; border: 1px solid var(--border); color: var(--text-dim); border-radius: 3px; cursor: pointer; font-size: 11px; padding: 2px 8px; }
   .picker-refresh:hover { color: var(--text); border-color: var(--text-dim); }
+
+  .library-dropdown {
+    position: fixed; top: 56px; left: 50%; transform: translateX(-50%);
+    background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px;
+    width: min(720px, calc(100vw - 32px)); max-height: min(70vh, 520px);
+    display: flex; flex-direction: column;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  }
+  .library-body { padding: 8px; overflow-y: auto; flex: 1; }
+  .library-item {
+    border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; margin-bottom: 8px;
+    background: var(--bg);
+  }
+  .library-item-head {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  }
+  .library-title { font-size: 13px; font-weight: 600; }
+  .library-meta { font-size: 12px; color: var(--text-dim); margin-top: 4px; line-height: 1.5; word-break: break-all; }
+  .library-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .library-actions button {
+    background: var(--bg-elev); color: var(--text); border: 1px solid var(--border);
+    border-radius: 4px; padding: 4px 8px; font-size: 12px;
+  }
+  .library-actions button:hover { border-color: var(--text-dim); }
+  .library-actions button.danger { color: var(--error); }
+  .library-empty { padding: 24px; text-align: center; color: var(--text-dim); font-size: 13px; }
 </style>
 </head>
 <body>
@@ -232,6 +258,7 @@
 <header>
   <div class="brand">Multi<span class="dot">·</span>Lab</div>
   <select id="tutorial-select"><option value="">加载中...</option></select>
+  <button id="library-btn" title="管理已导入的教程包">教程库</button>
   <button id="import-package-btn" title="从本机选择并打开 .mlab">打开 .mlab</button>
   <button id="export-save-btn" title="下载当前进度为 .mlab-save" disabled>导出进度</button>
   <button id="import-save-btn" title="从本机选择并导入 .mlab-save">导入进度</button>
@@ -300,6 +327,19 @@
     </div>
     <div class="picker-body" id="file-picker-list">
       <div class="file-empty">加载中...</div>
+    </div>
+  </div>
+</div>
+
+<!-- 教程库 -->
+<div class="picker-overlay" id="library-overlay" style="display:none">
+  <div class="library-dropdown" id="library-dropdown">
+    <div class="picker-header">
+      <span>已导入教程库</span>
+      <button class="picker-refresh" id="library-refresh-btn">刷新</button>
+    </div>
+    <div class="library-body" id="library-list">
+      <div class="library-empty">加载中...</div>
     </div>
   </div>
 </div>
@@ -712,6 +752,91 @@ async function openPackageFromFile(file) {
   }
 }
 
+function shortDigest(digest) {
+  const hex = String(digest || '').replace(/^sha256:/, '');
+  return hex.length > 16 ? `${hex.slice(0, 12)}…${hex.slice(-8)}` : hex;
+}
+
+function openLibraryPanel() {
+  document.getElementById('library-overlay').style.display = 'block';
+  loadLibraryList();
+}
+
+function closeLibraryPanel() {
+  document.getElementById('library-overlay').style.display = 'none';
+}
+
+async function loadLibraryList() {
+  const list = document.getElementById('library-list');
+  list.innerHTML = '<div class="library-empty">加载中...</div>';
+  try {
+    const res = await fetch('/api/packages');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { packages } = await res.json();
+    if (!packages?.length) {
+      list.innerHTML = '<div class="library-empty">还没有导入的 .mlab 包。可用“打开 .mlab”导入。</div>';
+      return;
+    }
+    list.innerHTML = packages.map((pkg, idx) => `
+      <div class="library-item" data-idx="${idx}">
+        <div class="library-item-head">
+          <div>
+            <div class="library-title">${escapeAttr(pkg.id)}@${escapeAttr(pkg.version || '0.0.0')}</div>
+            <div class="library-meta">
+              digest: ${escapeAttr(shortDigest(pkg.digest))}<br>
+              source: ${escapeAttr(pkg.source || '—')}<br>
+              imported: ${escapeAttr(pkg.imported_at || '—')}
+              ${pkg.files != null ? `<br>files: ${escapeAttr(String(pkg.files))}` : ''}
+            </div>
+          </div>
+          <div class="library-actions">
+            <button data-action="open" data-idx="${idx}">打开</button>
+            <button class="danger" data-action="delete" data-idx="${idx}">删除</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+    list._packages = packages;
+  } catch (e) {
+    list.innerHTML = `<div class="library-empty">加载失败: ${escapeAttr(e.message)}</div>`;
+  }
+}
+
+async function openLibraryPackage(pkg) {
+  closeLibraryPanel();
+  const preferredKey = pkg.source_key;
+  await loadTutorialList({
+    preferredKey,
+    preferredDigest: pkg.digest,
+    preferredSourceType: 'installed',
+  });
+  toast(`已打开 ${pkg.id}@${pkg.version}`);
+}
+
+async function deleteLibraryPackage(pkg) {
+  if (!confirm(`删除已导入包 ${pkg.id}@${pkg.version}？\n这不会删除学习进度 save。`)) return;
+  try {
+    const params = new URLSearchParams({
+      id: pkg.id,
+      version: pkg.version || '0.0.0',
+      digest: pkg.digest,
+    });
+    const res = await fetch(`/api/packages/item?${params}`, { method: 'DELETE' });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+
+    const currentKey = currentTutorial?.source_key || currentTutorial?.id;
+    if (currentKey && (currentKey === pkg.source_key || currentTutorial?.package_digest === pkg.digest)) {
+      currentTutorial = null;
+    }
+    await loadLibraryList();
+    await loadTutorialList({});
+    toast('已删除教程包');
+  } catch (e) {
+    toast('删除失败: ' + e.message, true);
+  }
+}
+
 async function exportSaveDownload() {
   if (!currentTutorial) return;
   const tutorialKey = currentTutorial.source_key || currentTutorial.id;
@@ -1008,6 +1133,20 @@ document.getElementById('file-picker-overlay').addEventListener('click', (e) => 
 });
 document.getElementById('picker-refresh-btn').addEventListener('click', () => loadFilePickerList(true));
 document.getElementById('tab-open-btn').addEventListener('click', openFilePicker);
+document.getElementById('library-btn').addEventListener('click', openLibraryPanel);
+document.getElementById('library-refresh-btn').addEventListener('click', loadLibraryList);
+document.getElementById('library-overlay').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) closeLibraryPanel();
+});
+document.getElementById('library-list').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn) return;
+  const packages = document.getElementById('library-list')._packages || [];
+  const pkg = packages[Number(btn.dataset.idx)];
+  if (!pkg) return;
+  if (btn.dataset.action === 'open') openLibraryPackage(pkg);
+  if (btn.dataset.action === 'delete') deleteLibraryPackage(pkg);
+});
 document.getElementById('import-package-btn').addEventListener('click', () => pickLocalFile('import-package-file'));
 document.getElementById('import-package-file').addEventListener('change', (e) => openPackageFromFile(e.target.files?.[0]));
 document.getElementById('export-save-btn').addEventListener('click', exportSaveDownload);

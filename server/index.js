@@ -188,6 +188,28 @@ app.get('/api/packages', async (req, res) => {
   }
 });
 
+app.get('/api/packages/item', async (req, res) => {
+  try {
+    const { id, version, digest } = req.query;
+    if (!id || !digest) return res.status(400).json({ error: 'id and digest required' });
+    res.json(await packageLibrary.getPackage({ id, version, digest }));
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/packages/item', async (req, res) => {
+  try {
+    const id = req.query.id || req.body?.id;
+    const version = req.query.version || req.body?.version;
+    const digest = req.query.digest || req.body?.digest;
+    if (!id || !digest) return res.status(400).json({ error: 'id and digest required' });
+    res.json(await packageLibrary.deletePackage({ id, version, digest }));
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message });
+  }
+});
+
 app.post('/api/packages/import', async (req, res) => {
   try {
     const { path: packagePath } = req.body;
