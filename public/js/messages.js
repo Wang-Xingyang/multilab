@@ -81,7 +81,6 @@ const catalog = {
     resetDone: '已重置当前 step',
     resetFailed: '重置失败: {error}',
     resetLog: '已重置 step {id}',
-    workspaceExporting: '导出中...',
     exportProgress: '导出进度',
     importProgress: '导入进度',
   },

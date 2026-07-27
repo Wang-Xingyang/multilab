@@ -200,10 +200,6 @@ document.getElementById('diag-btn').addEventListener('click', () => {
 document.getElementById('save-btn').addEventListener('click', saveFile);
 document.getElementById('revert-btn').addEventListener('click', resetCurrentStep);
 document.getElementById('test-btn').addEventListener('click', runTest);
-document.getElementById('export-btn').addEventListener('click', () => {
-  window.open('/api/workspace/export', '_blank');
-  toast(t('save.workspaceExporting'));
-});
 document.getElementById('prev-step').onclick = () => {
   if (state.currentStep > 0) enterStep(state.currentStep - 1);
 };
