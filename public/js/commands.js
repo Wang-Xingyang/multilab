@@ -11,7 +11,7 @@ import {
   revealAuxPanel,
   panelDeclared,
 } from './panels.js';
-import { saveCurrentStep } from './files.js';
+import { saveCurrentStep, refreshFileTree } from './files.js';
 
 export async function runCode() {
   if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
@@ -63,6 +63,7 @@ export async function runTest() {
       res.passed ? 'info' : 'warn'
     );
     toast(res.passed ? t('commands.testPassed') : t('commands.testFailed'), !res.passed);
+    refreshFileTree(false);
   } catch (e) {
     handleError(e, {
       feature: 'commands',
@@ -108,6 +109,7 @@ export async function runPreview() {
       res.passed === false ? t('commands.previewCommandFailed') : t('commands.previewUpdated'),
       res.passed === false
     );
+    refreshFileTree(false);
   } catch (e) {
     handleError(e, {
       feature: 'commands',

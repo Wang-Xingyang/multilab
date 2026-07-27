@@ -4,7 +4,7 @@ import { toast } from './ui.js';
 import { initTheme } from './theme.js';
 import { renderTrustButton, selectKernelFromUi } from './kernel.js';
 import { initLayout } from './layout.js';
-import { initTerminal, initWS, reconnectWS } from './terminal.js';
+import { initTerminal, initWS, reconnectWS, setTerminalExitCallback } from './terminal.js';
 import {
   applyPanelLayout,
   setAuxTab,
@@ -34,6 +34,7 @@ import {
   renderFileTabs,
   syncEditorToCurrentFile,
 } from './files.js';
+import { startFileTreePolling } from './file-tree.js';
 import { runCode, runTest, runPreview } from './commands.js';
 import { initTrustDialog, openTrustDialog, closeTrustDialog, setPackageTrust } from './trust.js';
 import { appendSessionLog, renderLogsPane } from './session-log.js';
@@ -43,6 +44,16 @@ initTheme();
 initLayout();
 initTerminal();
 initWS();
+
+// 文件树自动刷新:
+// 1. 终端命令退出时即时刷新 (事件驱动)
+// 2. 4s 轮询兜底, 覆盖终端里任意手敲命令 (touch/rm/mkdir 等)
+// 3. 页面从后台切回时刷新一次
+setTerminalExitCallback(() => refreshFileTree(false));
+startFileTreePolling();
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshFileTree(false);
+});
 
 // 顶栏下拉菜单: 点击 trigger 切换, 选中项/外部点击关闭
 function setupMenu(menuEl) {

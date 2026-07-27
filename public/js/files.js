@@ -155,6 +155,7 @@ async function saveCurrentStep(opts = {}) {
   state.fileModified = state.currentFiles.map(() => false);
   renderFileTabs();
   applyProgress(result.progress);
+  refreshFileTree(false);
   if (!opts.silent) toast(t('save.saved'));
 }
 

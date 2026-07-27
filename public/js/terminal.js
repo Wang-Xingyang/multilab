@@ -2,6 +2,14 @@ import { state, TERM_THEME } from './state.js';
 import { toast, status } from './ui.js';
 import { t } from './messages.js';
 
+// Callback fired when a terminal process exits (interactive command finishes).
+// Wired by app.js to trigger a file-tree refresh, since commands may create or
+// delete files in the workspace.
+let exitCallback = null;
+export function setTerminalExitCallback(fn) {
+  exitCallback = typeof fn === 'function' ? fn : null;
+}
+
 // ========== xterm ==========
 // xterm 全局由 /vendor 脚本提供;若加载失败不要让整个模块图崩掉。
 // 导出为显式 initTerminal(), 由 app.js 调用。
@@ -52,7 +60,10 @@ export function initWS() {
   state.ws.onmessage = (e) => {
     let msg; try { msg = JSON.parse(e.data); } catch { return; }
     if (msg.type === 'output') { if (state.term) state.term.write(msg.data); }
-    else if (msg.type === 'exit') { if (state.term) state.term.write(`\r\n\x1b[90m${t('ws.processExit', { code: msg.code })}\x1b[0m\r\n`); }
+    else if (msg.type === 'exit') {
+      if (state.term) state.term.write(`\r\n\x1b[90m${t('ws.processExit', { code: msg.code })}\x1b[0m\r\n`);
+      if (exitCallback) exitCallback();
+    }
     else if (msg.type === 'status') status(msg.message);
     else if (msg.type === 'ready') status(t('ws.ready'));
     else if (msg.type === 'error') {
