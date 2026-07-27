@@ -510,7 +510,7 @@
   }
   @keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
 
-  .picker-dropdown, .library-dropdown, .trust-dialog {
+  .picker-dropdown, .library-dropdown, .trust-dialog, .app-dialog {
     background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg); animation: pop-in var(--dur) var(--ease);
   }
@@ -577,20 +577,27 @@
   .library-actions button.danger:hover { background: var(--error-soft); border-color: var(--error); }
   .library-empty { padding: 28px; text-align: center; color: var(--text-faint); font-size: 13px; }
 
-  /* Trust 对话框 */
-  .trust-dialog {
+  /* 对话框 (trust-dialog + 通用 app-dialog 共享样式) */
+  .trust-dialog, .app-dialog {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
     width: min(440px, calc(100vw - 32px)); padding: 20px 22px;
     z-index: var(--z-dialog);
   }
-  .trust-dialog .dialog-icon {
+  .trust-dialog .dialog-icon, .app-dialog .dialog-icon {
     width: 36px; height: 36px; border-radius: 50%; display: inline-flex;
     align-items: center; justify-content: center; margin-bottom: 12px;
     background: var(--warn-soft); color: var(--warn);
   }
-  .trust-dialog .dialog-icon.revoke { background: var(--error-soft); color: var(--error); }
-  .trust-dialog h3 { font-size: 15.5px; margin-bottom: 8px; font-weight: 600; }
-  .trust-dialog p { font-size: 13px; color: var(--text-dim); line-height: 1.6; margin: 8px 0; }
+  .trust-dialog .dialog-icon.revoke, .app-dialog .dialog-icon.revoke { background: var(--error-soft); color: var(--error); }
+  .trust-dialog h3, .app-dialog h3 { font-size: 15.5px; margin-bottom: 8px; font-weight: 600; }
+  .trust-dialog p, .app-dialog p { font-size: 13px; color: var(--text-dim); line-height: 1.6; margin: 8px 0; }
+  .app-dialog .dialog-input {
+    width: 100%; box-sizing: border-box; margin: 4px 0 2px;
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 8px 10px; font-size: 13px;
+    font-family: var(--font-mono);
+  }
+  .app-dialog .dialog-input:focus { outline: none; border-color: var(--accent); }
   .trust-dialog .digest-label {
     font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
     color: var(--text-faint); margin-top: 14px; margin-bottom: 4px; font-weight: 600;
@@ -600,17 +607,17 @@
     background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
     padding: 9px 11px; word-break: break-all; color: var(--text);
   }
-  .trust-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
-  .trust-actions button {
+  .trust-actions, .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+  .trust-actions button, .dialog-actions button {
     background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
     border-radius: var(--radius-sm); padding: 7px 14px; font-size: 13px;
     transition: all var(--dur-fast) var(--ease);
   }
-  .trust-actions button:hover { border-color: var(--border-strong); background: var(--surface-3); }
-  .trust-actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .trust-actions button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
-  .trust-actions button.danger { color: var(--error); border-color: var(--error-soft); }
-  .trust-actions button.danger:hover { background: var(--error-soft); border-color: var(--error); }
+  .trust-actions button:hover, .dialog-actions button:hover { border-color: var(--border-strong); background: var(--surface-3); }
+  .trust-actions button.primary, .dialog-actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .trust-actions button.primary:hover, .dialog-actions button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+  .trust-actions button.danger, .dialog-actions button.danger { color: var(--error); border-color: var(--error-soft); }
+  .trust-actions button.danger:hover, .dialog-actions button.danger:hover { background: var(--error-soft); border-color: var(--error); }
 
   /* ============================================================
      加载提示

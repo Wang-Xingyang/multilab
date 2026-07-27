@@ -23,6 +23,7 @@ import {
   refreshFileTree,
 } from './file-tree.js';
 import { setPickerOpenHandler, closeFilePicker } from './file-picker.js';
+import { confirmDialog } from './dialog.js';
 
 function langForName(name) {
   const ext = (name.split('.').pop() || '').toLowerCase();
@@ -116,29 +117,6 @@ function closeFile(idx) {
   switchFile(newIdx, true);
 }
 
-function createNewFile() {
-  syncActiveEditor();
-  const name = prompt(t('files.newFilePrompt'), t('files.newFileDefault'));
-  if (!name || !name.trim()) return;
-  if (name.includes('/') || name.includes('\\') || name.includes('..')) {
-    toast(t('files.badName'), true);
-    return;
-  }
-  const language = langForName(name.trim());
-  state.currentFiles.push({
-    name: name.trim(),
-    language,
-    content: language === 'c' ? '#include <stdio.h>\n\nint main(void) {\n    \n    return 0;\n}\n'
-      : language === 'python' ? 'print("hello")\n'
-      : '',
-    originalContent: '',
-  });
-  state.fileModified.push(true);
-  state.activeFileIndex = state.currentFiles.length - 1;
-  renderFileTabs();
-  switchFile(state.activeFileIndex, true);
-}
-
 // ========== 保存 / Reset / 打开容器文件 ==========
 async function saveCurrentStep(opts = {}) {
   const step = currentStepObj();
@@ -174,7 +152,12 @@ async function saveFile() {
 async function resetCurrentStep() {
   const step = currentStepObj();
   if (!state.currentTutorial || !step) return;
-  if (!confirm(t('save.resetConfirm', { title: step.title || step.id }))) return;
+  const ok = await confirmDialog({
+    title: t('save.resetTitle'),
+    body: t('save.resetBody', { title: step.title || step.id }),
+    danger: true,
+  });
+  if (!ok) return;
   try {
     const result = await apiJson('/api/steps/reset', { tutorial: currentTutorialKey(), step: step.id });
     loadFilesIntoEditor(result.files || []);
@@ -285,7 +268,6 @@ export {
   loadFilesIntoEditor,
   renderFileTabs,
   closeFile,
-  createNewFile,
   saveCurrentStep,
   saveFile,
   resetCurrentStep,

@@ -59,7 +59,8 @@ const catalog = {
     libraryOpened: '已打开 {id}@{version}',
     deleted: '已删除教程包',
     deleteFailed: '删除失败: {error}',
-    deleteConfirm: '删除已导入包 {id}@{version}？\n digest: {digest}\n\n学员进度不会一并删除。',
+    deleteTitle: '确认删除教程包？',
+    deleteBody: '删除 {id}@{version}？digest: {digest}。学员进度不会一并删除。',
     emptyLibrary: '教程库为空。可用「打开 .mlab」导入。',
     loadLibraryFailed: '加载失败: {error}',
     library: '教程库',
@@ -77,7 +78,8 @@ const catalog = {
     importFailed: '导入进度失败: {error}',
     saved: '已保存当前 step',
     saveFailed: '保存失败: {error}',
-    resetConfirm: '重置当前 step "{title}"？当前 step 的保存会恢复为教程初始状态。',
+    resetTitle: '确认重置当前 step？',
+    resetBody: '重置 step "{title}"？当前 step 的保存会恢复为教程初始状态。',
     resetDone: '已重置当前 step',
     resetFailed: '重置失败: {error}',
     resetLog: '已重置 step {id}',
@@ -116,15 +118,12 @@ const catalog = {
     backendHint: '请确认后端服务运行在 http://localhost:{port}',
   },
   files: {
-    badName: '文件名不能包含路径',
     openFailed: '打开文件失败: {error}',
     emptyWorkspace: '工作区为空',
     loading: '加载中...',
     emptyEditor: '// No files for this step\n',
     loadingEditor: '// Loading tutorial...',
     closeTab: '关闭',
-    newFilePrompt: '文件名 (含后缀,如 hello.c)',
-    newFileDefault: 'new.c',
     readFailed: '读取失败',
     readDirFailed: '读取目录失败',
     collapseTree: '收起文件树',
@@ -159,6 +158,10 @@ const catalog = {
   },
   diagnostics: {
     openTutorial: '打开教程后可查看诊断信息。',
+  },
+  dialog: {
+    confirm: '确认',
+    cancel: '取消',
   },
 };
 

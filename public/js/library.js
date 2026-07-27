@@ -9,6 +9,7 @@ import { toast, status, escapeAttr } from './ui.js';
 import { t } from './messages.js';
 import { handleError } from './errors.js';
 import { loadTutorialList } from './tutorial-loader.js';
+import { confirmDialog } from './dialog.js';
 
 export function shortDigest(digest) {
   const hex = String(digest || '').replace(/^sha256:/, '');
@@ -70,7 +71,13 @@ export async function openLibraryPackage(pkg) {
 }
 
 export async function deleteLibraryPackage(pkg) {
-  if (!confirm(t('package.deleteConfirm', { id: pkg.id, version: pkg.version || '0.0.0', digest: pkg.digest }))) return;
+  const ok = await confirmDialog({
+    title: t('package.deleteTitle'),
+    body: t('package.deleteBody', { id: pkg.id, version: pkg.version || '0.0.0', digest: pkg.digest }),
+    confirmText: t('tutorial.delete'),
+    danger: true,
+  });
+  if (!ok) return;
   try {
     const params = new URLSearchParams({
       id: pkg.id,
