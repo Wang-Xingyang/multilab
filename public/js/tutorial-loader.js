@@ -17,18 +17,26 @@ import { renderTrustButton, refreshKernelResolution } from './kernel.js';
 import { loadFilesIntoEditor, saveCurrentStep } from './files.js';
 import { handleError } from './errors.js';
 
+let lastRenderedStepId = null;
 export function renderTutorialStepText() {
   const step = currentStepObj();
   const content = document.getElementById('tutorial-content');
   if (!state.currentTutorial || !step) {
     content.innerHTML = `<div class="tutorial-placeholder"><div class="ph-sub">${t('tutorial.emptyStep')}</div></div>`;
+    lastRenderedStepId = null;
     return;
   }
   content.innerHTML = DOMPurify.sanitize(marked.parse(step.instructions || ''));
-  // 克制的 step 切换淡入: 移除 class → reflow → 重新加上, 触发 animation
-  content.classList.remove('step-enter');
-  void content.offsetWidth;
-  content.classList.add('step-enter');
+  // 仅在 step 真正变化时触发淡入动画。enterStep 会调用两次 renderTutorialStepText
+  // (loading 前 + loaded 后), 同 step 重复触发 opacity 动画会造成正文闪烁。
+  if (lastRenderedStepId !== step.id) {
+    content.classList.remove('step-enter');
+    void content.offsetWidth;
+    content.classList.add('step-enter');
+  } else {
+    content.classList.remove('step-enter');
+  }
+  lastRenderedStepId = step.id;
   document.getElementById('test-btn').style.display = stepCommand(step, 'test') ? '' : 'none';
   document.getElementById('preview-btn').style.display = stepCommand(step, 'preview') ? '' : 'none';
 }

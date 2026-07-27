@@ -25,7 +25,8 @@
      ============================================================ */
   :root {
     /* surface 层级 (深 → 浅) */
-    --bg:          #1b1b1d;   /* 工作区底/终端 */
+    --bg:          #1b1b1d;   /* 工作区底 */
+    --term-bg:     #1e1e1e;   /* 终端区: 与 xterm theme background 对齐, 避免 padding 露出色差 */
     --surface-1:   #232326;   /* 面板 (header/tutorial/file-tree/aux) */
     --surface-2:   #2b2b2f;   /* elevated: 输入/卡片/hover */
     --surface-3:   #33333a;   /* active/按下/选中行 */
@@ -95,6 +96,7 @@
 
   :root[data-theme="light"] {
     --bg:          #f6f7f9;
+    --term-bg:     #ffffff;   /* 与 xterm light theme background 对齐 */
     --surface-1:   #ffffff;
     --surface-2:   #f1f2f5;
     --surface-3:   #e6e8ec;
@@ -377,7 +379,7 @@
   .editor-column .file-tabs { flex-shrink: 0; }
   #monaco { position: absolute; inset: 0; }
   .terminal-wrap {
-    flex: 1; background: var(--bg); padding: 6px 8px; overflow: hidden; position: relative;
+    flex: 1; background: var(--term-bg); padding: 6px 8px; overflow: hidden; position: relative;
   }
   #terminal { height: 100%; }
 
