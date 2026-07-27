@@ -549,9 +549,22 @@ app.get('/api/fs/ls', async (req, res) => {
         type: kind === 'd' ? 'dir' : 'file',
       });
     }
+    // Tree-aware sort: children 紧跟父目录, 同级目录优先于文件, 同类按名字。
+    // 逐级比较路径组件;分叉处查该级路径是否为目录(dir 优先);父子关系父在前。
+    const dirRels = new Set(entries.filter(e => e.type === 'dir').map(e => e.relative));
     entries.sort((a, b) => {
-      if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
-      return a.relative.localeCompare(b.relative);
+      const pa = a.relative.split('/');
+      const pb = b.relative.split('/');
+      const len = Math.min(pa.length, pb.length);
+      for (let i = 0; i < len; i++) {
+        if (pa[i] !== pb[i]) {
+          const aIsDir = dirRels.has(pa.slice(0, i + 1).join('/'));
+          const bIsDir = dirRels.has(pb.slice(0, i + 1).join('/'));
+          if (aIsDir !== bIsDir) return aIsDir ? -1 : 1;
+          return pa[i].localeCompare(pb[i]);
+        }
+      }
+      return pa.length - pb.length; // 父(短路径)在前
     });
     res.json({ path: dir, tree: true, depth: maxDepth, entries });
   } catch (e) { res.status(e.statusCode || 500).json({ error: e.message }); }

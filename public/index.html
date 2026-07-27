@@ -344,7 +344,7 @@
   }
   .file-tree-item:hover { background: var(--surface-2); color: var(--text); }
   .file-tree-item.active { color: var(--text); background: var(--accent-soft); }
-  .file-tree-item.dir { color: var(--text); cursor: default; font-weight: 500; }
+  .file-tree-item.dir { color: var(--text); cursor: pointer; font-weight: 500; }
   .file-tree-empty { padding: 16px 12px; color: var(--text-faint); font-size: 12px; text-align: center; }
 
   /* 文件 Tab 栏 */
@@ -704,9 +704,11 @@
     content: ''; display: inline-block; width: 10px; height: 10px; margin-right: 4px;
     flex-shrink: 0; color: var(--text-faint);
     background: currentColor;
-    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><polyline points='9 18 15 12 9 6' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/></svg>") center / contain no-repeat;
-            mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><polyline points='9 18 15 12 9 6' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/></svg>") center / contain no-repeat;
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><polyline points='6 9 12 15 18 9' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/></svg>") center / contain no-repeat;
+            mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><polyline points='6 9 12 15 18 9' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/></svg>") center / contain no-repeat;
+    transition: transform var(--dur-fast) var(--ease);
   }
+  .file-tree-item.dir.collapsed::before { transform: rotate(-90deg); }
 
   /* ============================================================
      响应式
@@ -735,6 +737,9 @@
   <!-- 左: brand + 教程 + 包管理菜单 + 存档菜单 -->
   <div class="header-group">
     <div class="brand">Multi<span class="dot">·</span>Lab</div>
+    <button id="theme-btn" class="hdr-btn icon-only" title="切换主题">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+    </button>
   </div>
   <div class="header-group">
     <select id="tutorial-select" aria-label="选择教程"><option value="">加载中...</option></select>
@@ -802,11 +807,6 @@
     </button>
     <button id="preview-btn" class="hdr-btn primary" title="预览" style="display:none">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-    </button>
-  </div>
-  <div class="header-group">
-    <button id="theme-btn" class="hdr-btn icon-only" title="切换主题">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
     </button>
   </div>
 

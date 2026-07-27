@@ -11,6 +11,9 @@
  * invoke refreshFileTree() directly after known local mutations (save, step
  * load). A visibilitychange listener refreshes once when the tab refocuses.
  *
+ * Directories are collapsible: clicking a dir toggles its children. The
+ * collapsed set is module-level state, preserved across refreshes.
+ *
  * All paths go through the same debounced entry point. A signature comparison
  * skips the DOM rebuild when the entry list is unchanged, preventing visual
  * noise and scroll jumps.
@@ -22,6 +25,11 @@ import { panelDeclared } from './panels.js';
 
 let openHandler = null;
 
+// Collapsed directory paths (preserved across refreshes).
+const collapsedDirs = new Set();
+// Last fetched entries — used for re-render on dir toggle without refetch.
+let lastEntries = [];
+
 export function setFileTreeOpenHandler(fn) {
   openHandler = typeof fn === 'function' ? fn : null;
 }
@@ -31,6 +39,14 @@ export function highlightFileTreePath(filePath) {
   document.querySelectorAll('#file-tree-body .file-tree-item.file').forEach(el => {
     el.classList.toggle('active', el.dataset.path === state.fileTreeActivePath);
   });
+}
+
+/** True if path lives beneath a collapsed directory. */
+function isUnderCollapsed(path) {
+  for (const d of collapsedDirs) {
+    if (path.startsWith(d + '/')) return true;
+  }
+  return false;
 }
 
 export function renderFileTree(entries) {
@@ -44,9 +60,13 @@ export function renderFileTree(entries) {
     return;
   }
   entries.forEach(entry => {
+    if (isUnderCollapsed(entry.path)) return;
     const depth = entry.relative.split('/').length - 1;
     const item = document.createElement('div');
     item.className = `file-tree-item ${entry.type === 'dir' ? 'dir' : 'file'}`;
+    if (entry.type === 'dir' && collapsedDirs.has(entry.path)) {
+      item.classList.add('collapsed');
+    }
     item.style.setProperty('--depth', String(depth));
     item.dataset.path = entry.path;
     item.title = entry.relative;
@@ -54,6 +74,12 @@ export function renderFileTree(entries) {
     if (entry.type === 'file') {
       if (entry.path === state.fileTreeActivePath) item.classList.add('active');
       item.addEventListener('click', () => openHandler?.(entry.path));
+    } else {
+      item.addEventListener('click', () => {
+        if (collapsedDirs.has(entry.path)) collapsedDirs.delete(entry.path);
+        else collapsedDirs.add(entry.path);
+        renderFileTree(lastEntries);
+      });
     }
     body.appendChild(item);
   });
@@ -83,6 +109,7 @@ async function doRefreshFileTree(force = false) {
   try {
     const data = await apiGet('/api/fs/ls?path=/home/student/workspace&tree=1&depth=4');
     const entries = data.entries || [];
+    lastEntries = entries;
     const sig = entriesSignature(entries);
     // Skip DOM rebuild when the tree structure hasn't changed — prevents
     // scroll jumps and visual flicker.
