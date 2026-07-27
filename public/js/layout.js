@@ -1,7 +1,8 @@
 import { state } from './state.js';
 
-// ========== 可拖拽分隔线 ==========
-(function initDragHandles() {
+// 可拖拽分隔线。导出为显式 initLayout(), 由 app.js 调用,
+// 而非靠 import 副作用执行。
+export function initLayout() {
   const tutorialPanel = document.getElementById('tutorial-panel');
   const workspacePanel = document.getElementById('workspace-panel');
   const workspaceMain = document.getElementById('workspace-main');
@@ -99,5 +100,4 @@ import { state } from './state.js';
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', up);
   });
-})();
-
+}

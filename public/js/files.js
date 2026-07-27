@@ -1,9 +1,28 @@
+/**
+ * Core editor coordination: file tabs, editor switching, step save/reset,
+ * and openFileFromContainer (the single entry point for opening a workspace
+ * file from either the file-tree or the file-picker).
+ *
+ * file-tree.js and file-picker.js are decoupled siblings; they receive
+ * openFileFromContainer via setFileTreeOpenHandler / setPickerOpenHandler
+ * so neither imports this module (no circular dependency).
+ *
+ * This module re-exports the file-tree / file-picker public API so that
+ * app.js keeps importing everything from './files.js'.
+ */
 import { state, currentStepObj, currentTutorialKey } from './state.js';
 import { apiJson } from './api.js';
 import { toast } from './ui.js';
 import { t } from './messages.js';
 import { appendSessionLog } from './session-log.js';
 import { applyProgress, panelDeclared } from './panels.js';
+import { handleError } from './errors.js';
+import {
+  setFileTreeOpenHandler,
+  highlightFileTreePath,
+  refreshFileTree,
+} from './file-tree.js';
+import { setPickerOpenHandler, closeFilePicker } from './file-picker.js';
 
 function langForName(name) {
   const ext = (name.split('.').pop() || '').toLowerCase();
@@ -63,7 +82,7 @@ function renderFileTabs() {
     }
     const close = document.createElement('span');
     close.className = 'tab-close';
-    close.title = '关闭';
+    close.title = t('files.closeTab');
     close.textContent = '×';
     close.addEventListener('click', (e) => { e.stopPropagation(); closeFile(i); });
     tab.appendChild(close);
@@ -96,7 +115,7 @@ function closeFile(idx) {
 
 function createNewFile() {
   syncActiveEditor();
-  const name = prompt('文件名 (含后缀,如 hello.c)', 'new.c');
+  const name = prompt(t('files.newFilePrompt'), t('files.newFileDefault'));
   if (!name || !name.trim()) return;
   if (name.includes('/') || name.includes('\\') || name.includes('..')) {
     toast(t('files.badName'), true);
@@ -140,7 +159,11 @@ async function saveFile() {
   try {
     await saveCurrentStep({ force: true });
   } catch (e) {
-    toast(t('save.saveFailed', { error: e.message }), true);
+    handleError(e, {
+      feature: 'files',
+      message: t('save.saveFailed', { error: e.message }),
+      notify: true,
+    });
   }
 }
 
@@ -155,7 +178,11 @@ async function resetCurrentStep() {
     appendSessionLog(t('save.resetLog', { id: step.id }), 'warn');
     toast(t('save.resetDone'));
   } catch (e) {
-    toast(t('save.resetFailed', { error: e.message }), true);
+    handleError(e, {
+      feature: 'files',
+      message: t('save.resetFailed', { error: e.message }),
+      notify: true,
+    });
   }
 }
 
@@ -168,12 +195,7 @@ function workspaceRelativeName(filePath) {
 
 async function openFileFromContainer(filename) {
   try {
-    const res = await fetch('/api/fs/read', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: filename }),
-    });
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || '读取失败');
-    const { content } = await res.json();
+    const { content } = await apiJson('/api/fs/read', { path: filename });
     const name = workspaceRelativeName(filename);
     const existing = state.currentFiles.findIndex(f => f.name === name || f.path === filename);
     if (existing >= 0) {
@@ -197,127 +219,20 @@ async function openFileFromContainer(filename) {
     switchFile(state.activeFileIndex, true);
     closeFilePicker();
     highlightFileTreePath(filename);
-  } catch (e) { toast(t('files.openFailed', { error: e.message }), true); }
-}
-
-function highlightFileTreePath(filePath) {
-  state.fileTreeActivePath = filePath || null;
-  document.querySelectorAll('#file-tree-body .file-tree-item.file').forEach(el => {
-    el.classList.toggle('active', el.dataset.path === state.fileTreeActivePath);
-  });
-}
-
-function renderFileTree(entries) {
-  const body = document.getElementById('file-tree-body');
-  body.innerHTML = '';
-  if (!entries.length) {
-    const empty = document.createElement('div');
-    empty.className = 'file-tree-empty';
-    empty.textContent = t('files.emptyWorkspace');
-    body.appendChild(empty);
-    return;
-  }
-  entries.forEach(entry => {
-    const depth = entry.relative.split('/').length - 1;
-    const item = document.createElement('div');
-    item.className = `file-tree-item ${entry.type === 'dir' ? 'dir' : 'file'}`;
-    item.style.setProperty('--depth', String(depth));
-    item.dataset.path = entry.path;
-    item.title = entry.relative;
-    item.textContent = (entry.type === 'dir' ? '▸ ' : '') + entry.name;
-    if (entry.type === 'file') {
-      if (entry.path === state.fileTreeActivePath) item.classList.add('active');
-      item.addEventListener('click', () => openFileFromContainer(entry.path));
-    }
-    body.appendChild(item);
-  });
-}
-
-async function refreshFileTree(force = false) {
-  if (!panelDeclared('file-tree')) return;
-  const body = document.getElementById('file-tree-body');
-  if (state.fileTreeFetching && !force) return;
-  state.fileTreeFetching = true;
-  if (!body.querySelector('.file-tree-item')) {
-    body.innerHTML = `<div class="file-tree-empty">${t('files.loading')}</div>`;
-  }
-  try {
-    const res = await fetch('/api/fs/ls?path=/home/student/workspace&tree=1&depth=4');
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || '读取目录失败');
-    const data = await res.json();
-    renderFileTree(data.entries || []);
   } catch (e) {
-    body.innerHTML = '';
-    const err = document.createElement('div');
-    err.className = 'file-tree-empty';
-    err.style.color = 'var(--error)';
-    err.textContent = e.message || '加载失败';
-    body.appendChild(err);
-  } finally {
-    state.fileTreeFetching = false;
+    handleError(e, {
+      feature: 'files',
+      message: t('files.openFailed', { error: e.message }),
+      notify: true,
+    });
   }
 }
 
-async function fetchFileList() {
-  const res = await fetch('/api/fs/ls?path=/home/student/workspace');
-  if (!res.ok) throw new Error('读取目录失败');
-  const { files } = await res.json();
-  state.fileListCache = files;
-  return files;
-}
-
-function renderFileList(files) {
-  const list = document.getElementById('file-picker-list');
-  list.innerHTML = '';
-  if (!files.length) {
-    const empty = document.createElement('div');
-    empty.className = 'file-empty';
-    empty.textContent = t('files.emptyWorkspace');
-    list.appendChild(empty);
-    return;
-  }
-  files.forEach(f => {
-    const item = document.createElement('div');
-    item.className = 'file-item';
-    const label = document.createElement('span');
-    label.textContent = f.name;
-    item.appendChild(label);
-    item.addEventListener('click', () => openFileFromContainer(`/home/student/workspace/${f.name}`));
-    list.appendChild(item);
-  });
-}
-
-async function loadFilePickerList(force = false) {
-  const list = document.getElementById('file-picker-list');
-  if (state.fileListCache && !force) {
-    renderFileList(state.fileListCache);
-    if (!state.fileListFetching) {
-      state.fileListFetching = true;
-      fetchFileList().then(files => renderFileList(files)).catch(() => {}).finally(() => { state.fileListFetching = false; });
-    }
-    return;
-  }
-  if (!state.fileListCache) list.innerHTML = `<div class="file-empty">${t('files.loading')}</div>`;
-  try {
-    renderFileList(await fetchFileList());
-  } catch (e) {
-    list.innerHTML = '';
-    const err = document.createElement('div');
-    err.className = 'file-empty';
-    err.style.color = 'var(--error)';
-    err.textContent = '错误: ' + e.message;
-    list.appendChild(err);
-  }
-}
-
-function openFilePicker() {
-  document.getElementById('file-picker-overlay').style.display = 'block';
-  loadFilePickerList();
-}
-
-function closeFilePicker() {
-  document.getElementById('file-picker-overlay').style.display = 'none';
-}
+// Register the open-file handler with both decoupled siblings.
+// Function declarations are hoisted, so referencing openFileFromContainer
+// here at module top is safe.
+setFileTreeOpenHandler(openFileFromContainer);
+setPickerOpenHandler(openFileFromContainer);
 
 function switchFile(idx, force = false) {
   if (idx < 0 || idx >= state.currentFiles.length) return;
@@ -345,6 +260,20 @@ function syncEditorToCurrentFile() {
   }
 }
 
+// Re-export decoupled siblings so app.js imports keep working from './files.js'.
+export {
+  renderFileTree,
+  refreshFileTree,
+  highlightFileTreePath,
+} from './file-tree.js';
+export {
+  fetchFileList,
+  renderFileList,
+  loadFilePickerList,
+  openFilePicker,
+  closeFilePicker,
+} from './file-picker.js';
+
 export {
   langForName,
   syncActiveEditor,
@@ -358,14 +287,6 @@ export {
   resetCurrentStep,
   workspaceRelativeName,
   openFileFromContainer,
-  highlightFileTreePath,
-  renderFileTree,
-  refreshFileTree,
-  fetchFileList,
-  renderFileList,
-  loadFilePickerList,
-  openFilePicker,
-  closeFilePicker,
   switchFile,
   syncEditorToCurrentFile,
 };

@@ -5,6 +5,7 @@ import {
   currentTutorialKey,
 } from './state.js';
 import { t } from './messages.js';
+import { apiGet } from './api.js';
 import { normalizeProgress, renderProgressStrip } from './progress.js';
 import { renderLogsPane } from './session-log.js';
 import { refreshDiagnosticsPane } from './diagnostics.js';
@@ -208,7 +209,7 @@ async function showPreviewContent(result) {
   } else if (urlMatch) {
     let resolved = null;
     try {
-      const runtime = await fetch('/api/runtime').then(r => r.ok ? r.json() : null);
+      const runtime = await apiGet('/api/runtime');
       const portMap = runtime?.port_map || {};
       const advertised = new URL(urlMatch[1]);
       const containerPort = Number(advertised.port || (advertised.protocol === 'https:' ? 443 : 80));

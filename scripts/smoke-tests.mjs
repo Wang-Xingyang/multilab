@@ -28,6 +28,7 @@ import {
   buildPreviewMeta,
 } from '../server/services/PreviewPortMap.js';
 import { t, getCatalog } from '../public/js/messages.js';
+import { normalizeProgress, stepIndexFromId } from '../public/js/progress.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -254,6 +255,39 @@ await test('KernelRegistry picks net kernel when network/preview ports required'
     security: { network_required: false },
   });
   assert.equal(offline.selected.id, 'gcc-ubuntu24-docker');
+});
+
+console.log('\n--- frontend progress.js (pure helpers) ---');
+await test('normalizeProgress: null/undefined → empty shape', () => {
+  const p = normalizeProgress(null);
+  assert.deepEqual(p, { current_step: null, visited: [], test_passed: {}, updated_at: null });
+  assert.deepEqual(normalizeProgress(undefined), p);
+});
+await test('normalizeProgress: shallow-copies visited & test_passed', () => {
+  const src = { current_step: 's2', visited: ['s1'], test_passed: { s1: true }, updated_at: 123 };
+  const p = normalizeProgress(src);
+  assert.equal(p.current_step, 's2');
+  assert.equal(p.updated_at, 123);
+  assert.deepEqual(p.visited, ['s1']);
+  assert.deepEqual(p.test_passed, { s1: true });
+  // mutation of source must not leak into normalized copy
+  src.visited.push('s2');
+  src.test_passed.s2 = false;
+  assert.deepEqual(p.visited, ['s1']);
+  assert.deepEqual(p.test_passed, { s1: true });
+});
+await test('normalizeProgress: tolerates malformed fields', () => {
+  const p = normalizeProgress({ visited: 'not-an-array', test_passed: 42 });
+  assert.deepEqual(p.visited, []);
+  assert.deepEqual(p.test_passed, {});
+});
+await test('stepIndexFromId: returns index or -1', () => {
+  const tut = { steps: [{ id: 's1' }, { id: 's2' }, { id: 's3' }] };
+  assert.equal(stepIndexFromId(tut, 's2'), 1);
+  assert.equal(stepIndexFromId(tut, 'missing'), -1);
+  assert.equal(stepIndexFromId(tut, ''), -1);
+  assert.equal(stepIndexFromId(null, 's1'), -1);
+  assert.equal(stepIndexFromId({ steps: [] }, 's1'), -1);
 });
 
 console.log('');

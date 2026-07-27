@@ -4,7 +4,8 @@ import { t } from './messages.js';
 
 // ========== xterm ==========
 // xterm 全局由 /vendor 脚本提供;若加载失败不要让整个模块图崩掉。
-function initTerminal() {
+// 导出为显式 initTerminal(), 由 app.js 调用。
+export function initTerminal() {
   const host = document.getElementById('terminal');
   if (!host) return;
   if (typeof Terminal === 'undefined') {
@@ -36,10 +37,10 @@ function initTerminal() {
     state.fitAddon = null;
   }
 }
-initTerminal();
 
 // ========== WebSocket ==========
-function connectWS() {
+// 导出为显式 initWS(), 由 app.js 调用 (不再顶层 connectWS 副作用)。
+export function initWS() {
   state.wsForceClose = false;
   if (state.wsReconnectTimer) {
     clearTimeout(state.wsReconnectTimer);
@@ -67,11 +68,11 @@ function connectWS() {
   state.ws.onclose = () => {
     if (state.wsForceClose) return;
     status(t('ws.disconnected'));
-    state.wsReconnectTimer = setTimeout(connectWS, 3000);
+    state.wsReconnectTimer = setTimeout(initWS, 3000);
   };
 }
 
-function reconnectWS(opts = {}) {
+export function reconnectWS(opts = {}) {
   state.wsForceClose = true;
   if (state.wsReconnectTimer) {
     clearTimeout(state.wsReconnectTimer);
@@ -83,9 +84,5 @@ function reconnectWS(opts = {}) {
   if (opts.reason && state.term) {
     state.term.write(`\r\n\x1b[90m${t('ws.reconnectBanner', { reason: opts.reason })}\x1b[0m\r\n`);
   }
-  connectWS();
+  initWS();
 }
-connectWS();
-
-
-export { connectWS, reconnectWS };

@@ -1,5 +1,6 @@
 import { escapeAttr } from './ui.js';
 import { t } from './messages.js';
+import { apiGet } from './api.js';
 
 function kv(rows) {
   return `<div class="diag-kv">${rows.map(([k, v]) =>
@@ -16,9 +17,7 @@ export async function refreshDiagnosticsPane(tutorialKey) {
   }
   pane.innerHTML = `<div class="aux-empty"><span>${t('panels.diagnosticsLoading')}</span></div>`;
   try {
-    const res = await fetch(`/api/diagnostics?tutorial=${encodeURIComponent(tutorialKey)}`);
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    const data = await apiGet(`/api/diagnostics?tutorial=${encodeURIComponent(tutorialKey)}`);
     const selected = data.resolution?.selected;
     const candidates = (data.resolution?.candidates || [])
       .map(c => `${c.id}${c.compatible ? '' : ' (incompatible)'}${c.recommended ? ' ★' : ''}`)

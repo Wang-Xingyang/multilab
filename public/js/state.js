@@ -1,6 +1,6 @@
-import { normalizeProgress } from './progress.js';
-
 /** Shared mutable UI/runtime state for no-bundler modules. */
+const EMPTY_PROGRESS = { current_step: null, visited: [], test_passed: {}, updated_at: null };
+
 export const state = {
   ws: null,
   editor: null,
@@ -8,7 +8,7 @@ export const state = {
   fitAddon: null,
   currentTutorial: null,
   currentStep: 0,
-  currentProgress: normalizeProgress(null),
+  currentProgress: EMPTY_PROGRESS,
   theme: (typeof localStorage !== 'undefined' && localStorage.getItem('multilab-theme')) || 'dark',
   currentFiles: [],
   activeFileIndex: 0,

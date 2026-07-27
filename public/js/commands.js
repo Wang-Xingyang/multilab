@@ -3,6 +3,7 @@ import { apiJson } from './api.js';
 import { toast, status } from './ui.js';
 import { t } from './messages.js';
 import { appendSessionLog } from './session-log.js';
+import { handleError } from './errors.js';
 import {
   applyProgress,
   showTestResults,
@@ -21,7 +22,11 @@ export async function runCode() {
   try {
     await saveCurrentStep({ silent: true });
   } catch (e) {
-    toast(t('commands.saveBeforeRunFailed', { error: e.message }), true);
+    handleError(e, {
+      feature: 'commands',
+      message: t('commands.saveBeforeRunFailed', { error: e.message }),
+      notify: true,
+    });
     return;
   }
   const step = currentStepObj();
@@ -59,7 +64,11 @@ export async function runTest() {
     );
     toast(res.passed ? t('commands.testPassed') : t('commands.testFailed'), !res.passed);
   } catch (e) {
-    toast(t('commands.testError', { error: e.message }), true);
+    handleError(e, {
+      feature: 'commands',
+      message: t('commands.testError', { error: e.message }),
+      notify: true,
+    });
   }
 }
 
@@ -82,7 +91,7 @@ export async function runPreview() {
       }));
       if (panelDeclared('web-preview')) {
         document.getElementById('pane-web-preview').innerHTML =
-          `<div class="aux-empty">${t('commands.previewInteractiveHint')}</div>`;
+          `<div class="aux-empty"><span>${t('commands.previewInteractiveHint')}</span></div>`;
         revealAuxPanel('web-preview');
       }
       toast(t('commands.previewStarted'));
@@ -100,6 +109,10 @@ export async function runPreview() {
       res.passed === false
     );
   } catch (e) {
-    toast(t('commands.previewFailed', { error: e.message }), true);
+    handleError(e, {
+      feature: 'commands',
+      message: t('commands.previewFailed', { error: e.message }),
+      notify: true,
+    });
   }
 }

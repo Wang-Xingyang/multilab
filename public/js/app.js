@@ -3,8 +3,8 @@ import { t } from './messages.js';
 import { toast } from './ui.js';
 import { initTheme } from './theme.js';
 import { renderTrustButton, selectKernelFromUi } from './kernel.js';
-import './layout.js';
-import { reconnectWS } from './terminal.js';
+import { initLayout } from './layout.js';
+import { initTerminal, initWS, reconnectWS } from './terminal.js';
 import {
   applyPanelLayout,
   setAuxTab,
@@ -41,6 +41,9 @@ import { appendSessionLog, renderLogsPane } from './session-log.js';
 import { refreshDiagnosticsPane } from './diagnostics.js';
 
 initTheme();
+initLayout();
+initTerminal();
+initWS();
 
 setPanelHooks({
   selectStep: (index) => enterStep(index),

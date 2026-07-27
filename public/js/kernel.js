@@ -1,7 +1,8 @@
 import { state, currentTutorialKey } from './state.js';
 import { toast, status, escapeAttr } from './ui.js';
-import { apiJson } from './api.js';
+import { apiJson, apiGet } from './api.js';
 import { t } from './messages.js';
+import { handleError } from './errors.js';
 import { reconnectWS } from './terminal.js';
 
 function renderTrustButton() {
@@ -53,12 +54,10 @@ async function refreshKernelResolution() {
     return;
   }
   try {
-    const res = await fetch(`/api/kernels/resolve?tutorial=${encodeURIComponent(currentTutorialKey())}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const resolution = await res.json();
+    const resolution = await apiGet(`/api/kernels/resolve?tutorial=${encodeURIComponent(currentTutorialKey())}`);
     renderKernelSelect(resolution);
   } catch (e) {
-    console.error('[MultiLab] kernel resolve failed:', e);
+    handleError(e, { feature: 'kernel' });
     renderKernelSelect(null);
   }
 }
@@ -83,7 +82,11 @@ async function selectKernelFromUi() {
     reconnectWS({ reason: result.kernel.id });
     toast(result.replaced ? t('kernel.switched', { id: result.kernel.id }) : t('kernel.applied', { id: result.kernel.id }));
   } catch (e) {
-    toast(t('kernel.switchFailed', { error: e.message }), true);
+    handleError(e, {
+      feature: 'kernel',
+      message: t('kernel.switchFailed', { error: e.message }),
+      notify: true,
+    });
     await refreshKernelResolution();
   }
 }
