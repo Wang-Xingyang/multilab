@@ -40,7 +40,7 @@ export function renderFileTree(entries) {
     item.style.setProperty('--depth', String(depth));
     item.dataset.path = entry.path;
     item.title = entry.relative;
-    item.textContent = (entry.type === 'dir' ? '▸ ' : '') + entry.name;
+    item.textContent = entry.name;
     if (entry.type === 'file') {
       if (entry.path === state.fileTreeActivePath) item.classList.add('active');
       item.addEventListener('click', () => openHandler?.(entry.path));

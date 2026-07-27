@@ -29,8 +29,12 @@ export function renderTutorialStepText() {
   content.classList.remove('step-enter');
   void content.offsetWidth;
   content.classList.add('step-enter');
-  document.getElementById('step-info').textContent =
-    t('tutorial.stepInfo', { current: state.currentStep + 1, total: state.currentTutorial.steps.length, title: step.title || '' });
+  const stepInfo = document.getElementById('step-info');
+  stepInfo.innerHTML =
+    `<span class="step-idx">${state.currentStep + 1}/${state.currentTutorial.steps.length}</span>` +
+    `<span class="sep">—</span>` +
+    `<span class="step-title"></span>`;
+  stepInfo.querySelector('.step-title').textContent = step.title || step.id;
   document.getElementById('prev-step').disabled = state.currentStep === 0;
   document.getElementById('next-step').disabled = state.currentStep === state.currentTutorial.steps.length - 1;
   document.getElementById('test-btn').style.display = stepCommand(step, 'test') ? '' : 'none';

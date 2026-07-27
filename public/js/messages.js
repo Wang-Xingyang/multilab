@@ -62,6 +62,8 @@ const catalog = {
     deleteConfirm: '删除已导入包 {id}@{version}？\n digest: {digest}\n\n学员进度不会一并删除。',
     emptyLibrary: '教程库为空。可用「打开 .mlab」导入。',
     loadLibraryFailed: '加载失败: {error}',
+    library: '教程库',
+    openMlab: '打开 .mlab',
   },
   save: {
     exporting: '导出进度...',
@@ -80,6 +82,8 @@ const catalog = {
     resetFailed: '重置失败: {error}',
     resetLog: '已重置 step {id}',
     workspaceExporting: '导出中...',
+    exportProgress: '导出进度',
+    importProgress: '导入进度',
   },
   tutorial: {
     openLog: '打开教程 {id}',
@@ -98,6 +102,8 @@ const catalog = {
     stepsSuffix: '步',
     open: '打开',
     delete: '删除',
+    prev: '上一步',
+    next: '下一步',
     placeholderLoadingTitle: '正在加载教程',
     placeholderLoadingSub: 'MultiLab 正在读取本地教程目录与已导入的包。',
     emptyTitle: '未找到教程',

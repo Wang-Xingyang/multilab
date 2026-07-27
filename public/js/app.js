@@ -45,6 +45,32 @@ initLayout();
 initTerminal();
 initWS();
 
+// 顶栏下拉菜单: 点击 trigger 切换, 选中项/外部点击关闭
+function setupMenu(menuEl) {
+  const trigger = menuEl.querySelector('.menu-trigger');
+  if (!trigger) return;
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.menu.open').forEach(m => { if (m !== menuEl) m.classList.remove('open'); });
+    menuEl.classList.toggle('open');
+  });
+  menuEl.querySelectorAll('.menu-pop button').forEach(btn => {
+    btn.addEventListener('click', () => menuEl.classList.remove('open'));
+  });
+}
+document.querySelectorAll('.menu').forEach(setupMenu);
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.menu')) document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
+});
+
+// 菜单项 / 底部 step 按钮文案填充 (走 messages.js t())
+document.querySelector('#library-btn .m-label').textContent = t('package.library');
+document.querySelector('#import-package-btn .m-label').textContent = t('package.openMlab');
+document.querySelector('#export-save-btn .m-label').textContent = t('save.exportProgress');
+document.querySelector('#import-save-btn .m-label').textContent = t('save.importProgress');
+document.querySelector('#prev-step .m-label').textContent = t('tutorial.prev');
+document.querySelector('#next-step .m-label').textContent = t('tutorial.next');
+
 setPanelHooks({
   selectStep: (index) => enterStep(index),
   refreshTree: (force) => refreshFileTree(force),
