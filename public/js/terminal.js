@@ -2,12 +2,12 @@ import { state, TERM_THEME } from './state.js';
 import { toast, status } from './ui.js';
 import { t } from './messages.js';
 
-// Callback fired when a terminal process exits (interactive command finishes).
-// Wired by app.js to trigger a file-tree refresh, since commands may create or
-// delete files in the workspace.
-let exitCallback = null;
-export function setTerminalExitCallback(fn) {
-  exitCallback = typeof fn === 'function' ? fn : null;
+// Callback fired when a terminal activity suggests the workspace filesystem
+// may have changed: user presses Enter (command executed) or a process exits.
+// Wired by app.js to trigger a file-tree refresh.
+let activityCallback = null;
+export function setTerminalActivityCallback(fn) {
+  activityCallback = typeof fn === 'function' ? fn : null;
 }
 
 // ========== xterm ==========
@@ -38,6 +38,8 @@ export function initTerminal() {
       if (state.ws && state.ws.readyState === WebSocket.OPEN) {
         state.ws.send(JSON.stringify({ type: 'input', data }));
       }
+      // Enter key — user executed a command, FS may have changed.
+      if (data.includes('\r') && activityCallback) activityCallback();
     });
   } catch (e) {
     console.error('[MultiLab] terminal init failed:', e);
@@ -62,7 +64,7 @@ export function initWS() {
     if (msg.type === 'output') { if (state.term) state.term.write(msg.data); }
     else if (msg.type === 'exit') {
       if (state.term) state.term.write(`\r\n\x1b[90m${t('ws.processExit', { code: msg.code })}\x1b[0m\r\n`);
-      if (exitCallback) exitCallback();
+      if (activityCallback) activityCallback();
     }
     else if (msg.type === 'status') status(msg.message);
     else if (msg.type === 'ready') status(t('ws.ready'));

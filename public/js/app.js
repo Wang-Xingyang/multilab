@@ -4,7 +4,7 @@ import { toast } from './ui.js';
 import { initTheme } from './theme.js';
 import { renderTrustButton, selectKernelFromUi } from './kernel.js';
 import { initLayout } from './layout.js';
-import { initTerminal, initWS, reconnectWS, setTerminalExitCallback } from './terminal.js';
+import { initTerminal, initWS, reconnectWS, setTerminalActivityCallback } from './terminal.js';
 import {
   applyPanelLayout,
   setAuxTab,
@@ -46,10 +46,10 @@ initTerminal();
 initWS();
 
 // 文件树自动刷新:
-// 1. 终端命令退出时即时刷新 (事件驱动)
+// 1. 终端按回车 (执行命令) 或进程退出时即时刷新 (事件驱动)
 // 2. 4s 轮询兜底, 覆盖终端里任意手敲命令 (touch/rm/mkdir 等)
 // 3. 页面从后台切回时刷新一次
-setTerminalExitCallback(() => refreshFileTree(false));
+setTerminalActivityCallback(() => refreshFileTree(false));
 startFileTreePolling();
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) refreshFileTree(false);
