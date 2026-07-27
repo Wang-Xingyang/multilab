@@ -18,32 +18,43 @@ export function stepIndexFromId(tutorial, stepId) {
 }
 
 export function renderProgressStrip(tutorial, progress, { currentStepIndex = 0, onSelectStep } = {}) {
-  const strip = document.getElementById('progress-strip');
-  if (!strip) return;
+  const container = document.getElementById('step-dots');
+  if (!container) return;
   if (!tutorial?.steps?.length) {
-    strip.innerHTML = '';
+    container.innerHTML = '';
     return;
   }
   const visited = new Set(progress?.visited || []);
   const passed = progress?.test_passed || {};
-  strip.innerHTML = '';
+  const total = tutorial.steps.length;
+  container.innerHTML = '';
   tutorial.steps.forEach((step, index) => {
-    const item = document.createElement('div');
     const isCurrent = index === currentStepIndex;
     const testState = passed[step.id];
-    let cls = 'progress-item';
+    let cls = 'step-dot';
     if (testState === true) cls += ' passed';
     else if (testState === false) cls += ' failed';
     else if (visited.has(step.id)) cls += ' visited';
     if (isCurrent) cls += ' current';
-    item.className = cls;
-    item.innerHTML =
-      `<span class="mark"></span>` +
-      `<span class="p-idx">${index + 1}.</span>` +
-      `<span class="p-title"></span>`;
-    item.querySelector('.p-title').textContent = step.title || step.id;
-    item.title = step.id;
-    item.addEventListener('click', () => onSelectStep?.(index));
-    strip.appendChild(item);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = cls;
+    const title = step.title || step.id;
+    btn.title = `${index + 1}. ${title}`;
+    if (isCurrent) {
+      btn.innerHTML =
+        `<span class="dot"></span>` +
+        `<span class="idx">${index + 1}/${total}</span>` +
+        `<span class="label"></span>`;
+      btn.querySelector('.label').textContent = title;
+    } else {
+      btn.innerHTML = `<span class="dot"></span>`;
+    }
+    btn.addEventListener('click', () => onSelectStep?.(index));
+    container.appendChild(btn);
   });
+  const prev = document.getElementById('prev-step');
+  const next = document.getElementById('next-step');
+  if (prev) prev.disabled = currentStepIndex <= 0;
+  if (next) next.disabled = currentStepIndex >= total - 1;
 }

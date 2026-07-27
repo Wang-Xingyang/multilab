@@ -29,14 +29,6 @@ export function renderTutorialStepText() {
   content.classList.remove('step-enter');
   void content.offsetWidth;
   content.classList.add('step-enter');
-  const stepInfo = document.getElementById('step-info');
-  stepInfo.innerHTML =
-    `<span class="step-idx">${state.currentStep + 1}/${state.currentTutorial.steps.length}</span>` +
-    `<span class="sep">—</span>` +
-    `<span class="step-title"></span>`;
-  stepInfo.querySelector('.step-title').textContent = step.title || step.id;
-  document.getElementById('prev-step').disabled = state.currentStep === 0;
-  document.getElementById('next-step').disabled = state.currentStep === state.currentTutorial.steps.length - 1;
   document.getElementById('test-btn').style.display = stepCommand(step, 'test') ? '' : 'none';
   document.getElementById('preview-btn').style.display = stepCommand(step, 'preview') ? '' : 'none';
 }

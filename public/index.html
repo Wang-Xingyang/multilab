@@ -303,41 +303,7 @@
   }
   .tutorial-placeholder.error .ph-title { color: var(--error); }
 
-  /* 进度区: strip + nav 整合为一个连贯块 */
-  .progress-strip {
-    border-top: 1px solid var(--border); padding: 6px 10px 4px;
-    background: var(--surface-1); max-height: 132px; overflow-y: auto;
-  }
-  .progress-strip:empty { display: none; }
-  .progress-item {
-    display: flex; align-items: center; gap: 8px; padding: 4px 8px;
-    border-radius: var(--radius-sm); font-size: 12px; color: var(--text-dim);
-    cursor: pointer; position: relative; transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
-  }
-  .progress-item:hover { background: var(--surface-2); color: var(--text); }
-  .progress-item.current {
-    color: var(--text); background: var(--accent-soft);
-  }
-  .progress-item.current::before {
-    content: ''; position: absolute; left: 0; top: 5px; bottom: 5px; width: 2px;
-    background: var(--accent); border-radius: var(--radius-pill);
-  }
-  .progress-item .mark {
-    width: 16px; height: 16px; flex-shrink: 0; display: inline-flex;
-    align-items: center; justify-content: center; font-size: 11px;
-  }
-  .progress-item .mark::before {
-    content: ''; width: 8px; height: 8px; border-radius: 50%;
-    border: 1.5px solid var(--text-faint); background: transparent;
-    transition: all var(--dur-fast) var(--ease);
-  }
-  .progress-item.visited .mark::before { border-color: var(--warn); background: var(--warn); }
-  .progress-item.passed .mark::before { border-color: var(--success); background: var(--success); }
-  .progress-item.failed .mark::before { border-color: var(--error); background: var(--error); }
-  .progress-item .p-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .progress-item .p-idx { color: var(--text-faint); font-variant-numeric: tabular-nums; font-size: 11px; }
-
-  /* tutorial-nav 已移至底部 step-bar, 见 .step-bar 样式 */
+  /* step 进度导航已整合到底部 step-bar, 见 .step-bar / .step-dots 样式 */
 
   /* ============================================================
      右侧: 编辑器 + 终端
@@ -657,32 +623,53 @@
   @keyframes spin { to { transform: rotate(360deg); } }
 
   /* ============================================================
-     底部 step 导航条 (横跨左右)
+     底部 step 导航条 (横跨左右, prev/dots/next 整合为一组居中)
      ============================================================ */
   .step-bar {
     flex-shrink: 0; height: var(--step-bar-h); display: flex; align-items: center;
-    gap: 8px; padding: 0 12px;
+    justify-content: center; padding: 0 12px;
     background: var(--surface-1); border-top: 1px solid var(--border);
   }
-  .step-bar .step-info {
-    flex: 1; min-width: 0; color: var(--text); font-size: 12.5px;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    display: flex; align-items: center; gap: 8px;
-  }
-  .step-bar .step-info .step-idx {
-    color: var(--text-faint); font-variant-numeric: tabular-nums; font-size: 11.5px;
-    font-family: var(--font-mono); flex-shrink: 0;
-  }
-  .step-bar .step-info .step-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .step-bar .step-info .sep { color: var(--text-faint); }
+  .step-nav { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
+  .step-dots { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
   .step-bar button {
-    background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
-    border-radius: var(--radius-sm); height: 26px; padding: 0 10px; font-size: 12px;
-    display: inline-flex; align-items: center; gap: 4px;
-    transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+    height: 26px; border-radius: var(--radius-sm); font-size: 12px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+    cursor: pointer;
+    transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
   }
-  .step-bar button:hover:not(:disabled) { background: var(--surface-3); border-color: var(--border-strong); }
-  .step-bar button:disabled { opacity: 0.35; cursor: not-allowed; }
+  #prev-step, #next-step {
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+    padding: 0 9px; min-width: 30px;
+  }
+  #prev-step:hover:not(:disabled), #next-step:hover:not(:disabled) { background: var(--surface-3); border-color: var(--border-strong); }
+  #prev-step:disabled, #next-step:disabled { opacity: 0.35; cursor: not-allowed; }
+  .step-dot {
+    background: transparent; color: var(--text-dim);
+    border: 1px solid transparent; padding: 0 8px; min-width: 26px;
+    white-space: nowrap; flex-shrink: 0;
+  }
+  .step-dot:hover { background: var(--surface-2); color: var(--text); }
+  .step-dot .dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    border: 1.5px solid var(--text-faint); background: transparent;
+    transition: all var(--dur-fast) var(--ease);
+  }
+  .step-dot.visited .dot { border-color: var(--warn); background: var(--warn); }
+  .step-dot.passed .dot { border-color: var(--success); background: var(--success); }
+  .step-dot.failed .dot { border-color: var(--error); background: var(--error); }
+  .step-dot.current {
+    color: var(--text); background: var(--accent-soft); border-color: var(--accent-line);
+  }
+  .step-dot.current .dot { border-color: var(--accent); background: var(--accent); }
+  .step-dot .idx {
+    font-variant-numeric: tabular-nums; font-family: var(--font-mono);
+    font-size: 11px; color: var(--text-faint);
+  }
+  .step-dot.current .idx { color: var(--text-dim); }
+  .step-dot .label {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px;
+  }
 
   /* ============================================================
      顶栏下拉菜单 (package / save 合并)
@@ -731,8 +718,7 @@
   @media (max-width: 720px) {
     header .brand { display: none; }
     header .trust-badge .lbl { display: none; }
-    .step-bar .m-label { display: none; }
-    .step-bar .step-info .sep { display: none; }
+    .step-dot .label { display: none; }
     .library-dropdown { width: calc(100vw - 16px); }
     .picker-dropdown { width: calc(100vw - 16px); }
     .aux-panel { position: absolute; right: 0; top: 0; bottom: 0; width: 86vw; z-index: var(--z-drag); box-shadow: var(--shadow-lg); }
@@ -832,7 +818,6 @@
         <div class="ph-sub">MultiLab 正在读取本地教程目录与已导入的包。</div>
       </div>
     </div>
-    <div class="progress-strip" id="progress-strip" aria-label="学习进度"></div>
   </section>
   <div class="drag-handle-v" id="drag-v"></div>
   <section class="workspace-panel" id="workspace-panel">
@@ -906,15 +891,15 @@
 </main>
 
 <footer class="step-bar">
-  <button id="prev-step" title="上一步">
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-    <span class="m-label"></span>
-  </button>
-  <span class="step-info" id="step-info"><span class="step-idx">—</span></span>
-  <button id="next-step" title="下一步">
-    <span class="m-label"></span>
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-  </button>
+  <div class="step-nav">
+    <button id="prev-step" type="button">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+    </button>
+    <div class="step-dots" id="step-dots"></div>
+    <button id="next-step" type="button">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </button>
+  </div>
 </footer>
 
 <div class="status-bar" id="status-bar"></div>

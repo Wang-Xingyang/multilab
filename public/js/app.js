@@ -68,8 +68,8 @@ document.querySelector('#library-btn .m-label').textContent = t('package.library
 document.querySelector('#import-package-btn .m-label').textContent = t('package.openMlab');
 document.querySelector('#export-save-btn .m-label').textContent = t('save.exportProgress');
 document.querySelector('#import-save-btn .m-label').textContent = t('save.importProgress');
-document.querySelector('#prev-step .m-label').textContent = t('tutorial.prev');
-document.querySelector('#next-step .m-label').textContent = t('tutorial.next');
+document.getElementById('prev-step').title = t('tutorial.prev');
+document.getElementById('next-step').title = t('tutorial.next');
 
 setPanelHooks({
   selectStep: (index) => enterStep(index),
