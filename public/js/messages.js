@@ -127,6 +127,9 @@ const catalog = {
     newFileDefault: 'new.c',
     readFailed: '读取失败',
     readDirFailed: '读取目录失败',
+    refreshTree: '刷新文件树',
+    collapseTree: '收起文件树',
+    expandTree: '显示文件树',
   },
   commands: {
     wsDisconnected: 'WebSocket 未连接',

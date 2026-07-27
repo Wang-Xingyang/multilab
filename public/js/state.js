@@ -23,6 +23,7 @@ export const state = {
   wsReconnectTimer: null,
   fileTreeFetching: false,
   fileTreeActivePath: null,
+  fileTreeCollapsed: false,
 };
 
 export const FALLBACK_PANELS = [

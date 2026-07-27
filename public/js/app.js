@@ -30,7 +30,6 @@ import {
   resetCurrentStep,
   refreshFileTree,
   loadFilePickerList,
-  openFilePicker,
   closeFilePicker,
   renderFileTabs,
   syncEditorToCurrentFile,
@@ -162,7 +161,6 @@ document.getElementById('file-picker-overlay').addEventListener('click', (e) => 
 });
 document.getElementById('file-picker-close-btn').addEventListener('click', closeFilePicker);
 document.getElementById('picker-refresh-btn').addEventListener('click', () => loadFilePickerList(true));
-document.getElementById('tab-open-btn').addEventListener('click', openFilePicker);
 document.getElementById('kernel-select').addEventListener('change', selectKernelFromUi);
 document.getElementById('reconnect-btn').addEventListener('click', () => {
   reconnectWS({ reason: 'manual' });
@@ -210,6 +208,22 @@ document.getElementById('next-step').onclick = () => {
 };
 document.getElementById('preview-btn').addEventListener('click', runPreview);
 document.getElementById('file-tree-refresh-btn').addEventListener('click', () => refreshFileTree(true));
+document.getElementById('file-tree-refresh-btn').title = t('files.refreshTree');
+document.getElementById('file-tree-collapse-btn').title = t('files.collapseTree');
+document.getElementById('tab-show-tree-btn').title = t('files.expandTree');
+function setFileTreeCollapsed(collapsed) {
+  state.fileTreeCollapsed = collapsed;
+  const treePanel = document.getElementById('file-tree-panel');
+  const dragTree = document.getElementById('drag-v-tree');
+  const showTree = treePanel.classList.contains('visible');
+  treePanel.classList.toggle('collapsed', collapsed);
+  dragTree.style.display = (showTree && !collapsed) ? '' : 'none';
+  document.getElementById('tab-show-tree-btn').style.display = (collapsed && showTree) ? '' : 'none';
+  if (!collapsed && showTree) refreshFileTree(false);
+  if (state.fitAddon) state.fitAddon.fit();
+}
+document.getElementById('file-tree-collapse-btn').addEventListener('click', () => setFileTreeCollapsed(true));
+document.getElementById('tab-show-tree-btn').addEventListener('click', () => setFileTreeCollapsed(false));
 document.getElementById('aux-close-btn').addEventListener('click', () => {
   state.auxVisible = false;
   applyPanelLayout();

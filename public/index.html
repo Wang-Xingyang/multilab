@@ -319,7 +319,7 @@
     width: 200px; flex-shrink: 0; display: none; flex-direction: column;
     background: var(--surface-1); min-width: 140px; max-width: 360px;
   }
-  .file-tree-panel.visible { display: flex; }
+  .file-tree-panel.visible:not(.collapsed) { display: flex; }
   .file-tree-head {
     height: var(--tab-h); display: flex; align-items: center; justify-content: space-between;
     padding: 0 4px 0 12px; border-bottom: 1px solid var(--border);
@@ -327,6 +327,7 @@
   }
   .file-tree-head .tree-title { display: inline-flex; align-items: center; gap: 6px; }
   .file-tree-head .tree-title svg { color: var(--text-faint); }
+  .file-tree-head .tree-actions { display: inline-flex; align-items: center; gap: 2px; }
   .file-tree-head button {
     background: none; border: 1px solid transparent; color: var(--text-dim);
     border-radius: var(--radius-xs); font-size: 11px; padding: 2px 7px;
@@ -369,11 +370,12 @@
   }
   .file-tabs .tab:hover .tab-close { opacity: 0.6; }
   .file-tabs .tab .tab-close:hover { opacity: 1; background: var(--surface-3); color: var(--error); }
-  .file-tabs .tab-new {
-    padding: 0 8px; font-size: 15px; display: flex; align-items: center; cursor: pointer;
+  .file-tabs .tab-show-tree {
+    padding: 0 8px; display: flex; align-items: center; cursor: pointer;
     color: var(--text-dim); transition: all var(--dur-fast) var(--ease); flex-shrink: 0; border-radius: var(--radius-sm);
+    background: none; border: none;
   }
-  .file-tabs .tab-new:hover { color: var(--text); background: var(--surface-2); }
+  .file-tabs .tab-show-tree:hover { color: var(--text); background: var(--surface-2); }
 
   .editor-wrap { flex: 1; border-bottom: none; position: relative; min-height: 0; }
   .editor-column .file-tabs { flex-shrink: 0; }
@@ -830,10 +832,14 @@
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
             Files
           </span>
-          <button type="button" id="file-tree-refresh-btn" title="刷新文件树">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-            刷新
-          </button>
+          <div class="tree-actions">
+            <button type="button" id="file-tree-refresh-btn" title="刷新文件树">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            </button>
+            <button type="button" id="file-tree-collapse-btn" title="收起文件树">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+          </div>
         </div>
         <div class="file-tree-body" id="file-tree-body">
           <div class="file-tree-empty">加载中...</div>
@@ -842,9 +848,9 @@
       <div class="drag-handle-v" id="drag-v-tree" style="display:none"></div>
       <div class="editor-column" id="editor-column">
         <div class="file-tabs" id="file-tabs">
-          <div class="tab-new" id="tab-open-btn" title="打开容器文件">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-          </div>
+          <button class="tab-show-tree" id="tab-show-tree-btn" type="button" title="显示文件树" style="display:none">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+          </button>
         </div>
         <div class="editor-wrap" id="editor-wrap"><div id="monaco"></div></div>
       </div>

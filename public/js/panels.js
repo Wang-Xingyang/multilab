@@ -77,9 +77,11 @@ function applyPanelLayout() {
 
   const treePanel = document.getElementById('file-tree-panel');
   const dragTree = document.getElementById('drag-v-tree');
+  const treeCollapsed = state.fileTreeCollapsed;
   treePanel.classList.toggle('visible', showFileTree);
-  dragTree.style.display = showFileTree ? '' : 'none';
-  if (showFileTree) {
+  treePanel.classList.toggle('collapsed', treeCollapsed);
+  dragTree.style.display = (showFileTree && !treeCollapsed) ? '' : 'none';
+  if (showFileTree && !treeCollapsed) {
     const body = document.getElementById('file-tree-body');
     if (!body.querySelector('.file-tree-item')) panelHooks.refreshTree?.(false);
   }

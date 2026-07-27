@@ -66,8 +66,10 @@ function loadFilesIntoEditor(files) {
 // ========== 文件标签栏 ==========
 function renderFileTabs() {
   const container = document.getElementById('file-tabs');
-  const openBtn = document.getElementById('tab-open-btn');
-  container.innerHTML = '';
+  const showTreeBtn = document.getElementById('tab-show-tree-btn');
+  // 只移除 .tab, 保留静态的 tab-show-tree-btn (不再用 innerHTML='' 清空)
+  container.querySelectorAll('.tab').forEach(el => el.remove());
+  const fragment = document.createDocumentFragment();
   state.currentFiles.forEach((f, i) => {
     const tab = document.createElement('div');
     tab.className = 'tab' + (i === state.activeFileIndex ? ' active' : '');
@@ -90,9 +92,10 @@ function renderFileTabs() {
       if (e.target.closest('.tab-close')) return;
       switchFile(i);
     });
-    container.appendChild(tab);
+    fragment.appendChild(tab);
   });
-  container.appendChild(openBtn);
+  if (showTreeBtn) container.insertBefore(fragment, showTreeBtn);
+  else container.appendChild(fragment);
 }
 
 function closeFile(idx) {
