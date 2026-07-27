@@ -10,11 +10,16 @@ import { loadFilesIntoEditor, saveCurrentStep } from './files.js';
 
 function renderTutorialStepText() {
   const step = currentStepObj();
+  const content = document.getElementById('tutorial-content');
   if (!state.currentTutorial || !step) {
-    document.getElementById('tutorial-content').innerHTML = `<p style="color:var(--text-dim)">${t('tutorial.emptyStep')}</p>`;
+    content.innerHTML = `<div class="tutorial-placeholder"><div class="ph-sub">${t('tutorial.emptyStep')}</div></div>`;
     return;
   }
-  document.getElementById('tutorial-content').innerHTML = DOMPurify.sanitize(marked.parse(step.instructions || ''));
+  content.innerHTML = DOMPurify.sanitize(marked.parse(step.instructions || ''));
+  // 克制的 step 切换淡入: 移除 class → reflow → 重新加上, 触发 animation
+  content.classList.remove('step-enter');
+  void content.offsetWidth;
+  content.classList.add('step-enter');
   document.getElementById('step-info').textContent =
     t('tutorial.stepInfo', { current: state.currentStep + 1, total: state.currentTutorial.steps.length, title: step.title || '' });
   document.getElementById('prev-step').disabled = state.currentStep === 0;
@@ -30,14 +35,16 @@ async function loadTutorialList(opts = {}) {
     const { tutorials, expectedDir } = await res.json();
     const sel = document.getElementById('tutorial-select');
     if (tutorials.length === 0) {
-      sel.innerHTML = '<option value="">未找到教程</option>';
+      sel.innerHTML = `<option value="">${t('tutorial.selectPlaceholder')}</option>`;
       document.getElementById('tutorial-content').innerHTML =
-        `<div style="padding:32px;color:var(--text-dim)">
-          <h2 style="color:var(--warn);margin-bottom:12px">未找到教程</h2>
-          <p>TUTORIALS_DIR 环境变量指向的目录中无可用教程。</p>
-          <p style="margin-top:8px">搜索路径: <code>${escapeAttr(expectedDir || '(未知)')}</code></p>
-          <p style="margin-top:12px">请确认:</p>
-          <ol><li>教程目录存在且包含 multilab.json</li><li>.env 中 TUTORIALS_DIR 指向正确</li></ol>
+        `<div class="tutorial-placeholder">
+          <div class="ph-title">${t('tutorial.emptyTitle')}</div>
+          <div class="ph-sub">${t('tutorial.emptySub')}</div>
+          <div class="ph-sub" style="margin-top:4px"><code>${escapeAttr(expectedDir || '(未知)')}</code></div>
+          <div class="ph-hint">
+            <div style="margin-bottom:6px">${t('tutorial.emptyCheckTitle')}</div>
+            <ol style="margin:0;padding-left:18px;line-height:1.8"><li>${t('tutorial.emptyCheck1')}</li><li>${t('tutorial.emptyCheck2')}</li></ol>
+          </div>
         </div>`;
       document.getElementById('loading-msg').style.display = 'none';
       return;
@@ -63,8 +70,11 @@ async function loadTutorialList(opts = {}) {
   } catch (e) {
     console.error('[MultiLab] 加载教程列表失败:', e);
     document.getElementById('tutorial-content').innerHTML =
-      `<p style="color:var(--error)">加载教程列表失败: ${escapeAttr(e.message)}</p>
-       <p style="color:var(--text-dim);margin-top:8px">请确认后端服务运行在 <code>http://localhost:${location.port || 3000}</code></p>`;
+      `<div class="tutorial-placeholder error">
+        <div class="ph-title">${t('tutorial.listFailedTitle')}</div>
+        <div class="ph-sub">${escapeAttr(e.message)}</div>
+        <div class="ph-hint">${t('tutorial.backendHint', { port: location.port || 3000 })}</div>
+      </div>`;
   }
 }
 
@@ -106,13 +116,13 @@ function closeLibraryPanel() {
 
 async function loadLibraryList() {
   const list = document.getElementById('library-list');
-  list.innerHTML = '<div class="library-empty">加载中...</div>';
+  list.innerHTML = `<div class="library-empty">${t('files.loading')}</div>`;
   try {
     const res = await fetch('/api/packages');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const { packages } = await res.json();
     if (!packages?.length) {
-      list.innerHTML = '<div class="library-empty">还没有导入的 .mlab 包。可用“打开 .mlab”导入。</div>';
+      list.innerHTML = `<div class="library-empty">${t('package.emptyLibrary')}</div>`;
       return;
     }
     list.innerHTML = packages.map((pkg, idx) => `
@@ -136,7 +146,7 @@ async function loadLibraryList() {
     `).join('');
     list._packages = packages;
   } catch (e) {
-    list.innerHTML = `<div class="library-empty">加载失败: ${escapeAttr(e.message)}</div>`;
+    list.innerHTML = `<div class="library-empty">${t('package.loadLibraryFailed', { error: e.message })}</div>`;
   }
 }
 
@@ -152,7 +162,7 @@ async function openLibraryPackage(pkg) {
 }
 
 async function deleteLibraryPackage(pkg) {
-  if (!confirm(`删除已导入包 ${pkg.id}@${pkg.version}？\n这不会删除学习进度 save。`)) return;
+  if (!confirm(t('package.deleteConfirm', { id: pkg.id, version: pkg.version || '0.0.0', digest: pkg.digest }))) return;
   try {
     const params = new URLSearchParams({
       id: pkg.id,
@@ -254,8 +264,10 @@ async function loadTutorial(id) {
     console.error(`[MultiLab] 加载教程 ${id} 失败:`, e);
     appendSessionLog(t('tutorial.loadFailed', { error: e.message }), 'error');
     document.getElementById('tutorial-content').innerHTML =
-      `<p style="color:var(--error)">加载教程失败: ${escapeAttr(e.message)}</p>
-       <p style="color:var(--text-dim);margin-top:8px">按 F12 打开开发者工具查看详细错误</p>`;
+      `<div class="tutorial-placeholder error">
+        <div class="ph-title">${t('tutorial.loadFailedHtml', { error: escapeAttr(e.message) })}</div>
+        <div class="ph-hint">${t('tutorial.loadFailedHint')}</div>
+      </div>`;
   }
 }
 

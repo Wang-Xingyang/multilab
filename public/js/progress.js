@@ -31,14 +31,17 @@ export function renderProgressStrip(tutorial, progress, { currentStepIndex = 0, 
     const item = document.createElement('div');
     const isCurrent = index === currentStepIndex;
     const testState = passed[step.id];
-    let mark = '·';
     let cls = 'progress-item';
-    if (testState === true) { mark = '✓'; cls += ' passed'; }
-    else if (testState === false) { mark = '✗'; cls += ' failed'; }
-    else if (visited.has(step.id)) { mark = '○'; cls += ' visited'; }
+    if (testState === true) cls += ' passed';
+    else if (testState === false) cls += ' failed';
+    else if (visited.has(step.id)) cls += ' visited';
     if (isCurrent) cls += ' current';
     item.className = cls;
-    item.innerHTML = `<span class="mark">${mark}</span><span>${index + 1}. ${step.title || step.id}</span>`;
+    item.innerHTML =
+      `<span class="mark"></span>` +
+      `<span class="p-idx">${index + 1}.</span>` +
+      `<span class="p-title"></span>`;
+    item.querySelector('.p-title').textContent = step.title || step.id;
     item.title = step.id;
     item.addEventListener('click', () => onSelectStep?.(index));
     strip.appendChild(item);

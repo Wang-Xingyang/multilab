@@ -21,7 +21,7 @@ export function renderLogsPane() {
   const pane = document.getElementById('pane-logs');
   if (!pane) return;
   if (!entries.length) {
-    pane.innerHTML = '<div class="aux-empty">会话日志会显示在这里。</div>';
+    pane.innerHTML = `<div class="aux-empty"><span>${t('panels.logsEmpty')}</span></div>`;
     return;
   }
   pane.innerHTML = '';

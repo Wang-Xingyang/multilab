@@ -11,10 +11,10 @@ export async function refreshDiagnosticsPane(tutorialKey) {
   const pane = document.getElementById('pane-diagnostics');
   if (!pane) return;
   if (!tutorialKey) {
-    pane.innerHTML = '<div class="aux-empty">打开教程后可查看诊断信息。</div>';
+    pane.innerHTML = `<div class="aux-empty"><span>${t('diagnostics.openTutorial')}</span></div>`;
     return;
   }
-  pane.innerHTML = '<div class="aux-empty">加载诊断...</div>';
+  pane.innerHTML = `<div class="aux-empty"><span>${t('panels.diagnosticsLoading')}</span></div>`;
   try {
     const res = await fetch(`/api/diagnostics?tutorial=${encodeURIComponent(tutorialKey)}`);
     const data = await res.json().catch(() => ({}));

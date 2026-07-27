@@ -9,7 +9,8 @@ function renderTrustButton() {
   const exportBtn = document.getElementById('export-save-btn');
   const reconnectBtn = document.getElementById('reconnect-btn');
   if (!state.currentTutorial?.package_digest) {
-    btn.textContent = t('trust.unloaded');
+    btn.dataset.state = '';
+    btn.querySelector('.lbl').textContent = t('trust.unloaded');
     btn.title = t('trust.title');
     btn.disabled = true;
     exportBtn.disabled = true;
@@ -18,7 +19,8 @@ function renderTrustButton() {
   }
   const trust = state.currentTutorial.trust || 'untrusted';
   const isTrusted = trust === 'user-trusted';
-  btn.textContent = isTrusted ? t('trust.trusted') : t('trust.untrusted');
+  btn.dataset.state = trust;
+  btn.querySelector('.lbl').textContent = isTrusted ? t('trust.trusted') : t('trust.untrusted');
   btn.title = t('trust.titleWithState', { source: state.currentTutorial.trust_default ? t('trust.sourceDefault') : t('trust.sourceUser'), trust });
   btn.disabled = false;
   exportBtn.disabled = false;

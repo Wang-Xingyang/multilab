@@ -239,7 +239,7 @@ async function refreshFileTree(force = false) {
   if (state.fileTreeFetching && !force) return;
   state.fileTreeFetching = true;
   if (!body.querySelector('.file-tree-item')) {
-    body.innerHTML = '<div class="file-tree-empty">加载中...</div>';
+    body.innerHTML = `<div class="file-tree-empty">${t('files.loading')}</div>`;
   }
   try {
     const res = await fetch('/api/fs/ls?path=/home/student/workspace&tree=1&depth=4');
@@ -297,7 +297,7 @@ async function loadFilePickerList(force = false) {
     }
     return;
   }
-  if (!state.fileListCache) list.innerHTML = '<div class="file-empty">加载中...</div>';
+  if (!state.fileListCache) list.innerHTML = `<div class="file-empty">${t('files.loading')}</div>`;
   try {
     renderFileList(await fetchFileList());
   } catch (e) {

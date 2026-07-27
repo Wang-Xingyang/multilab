@@ -203,7 +203,7 @@ async function showPreviewContent(result) {
     renderPreviewUrlFrame(pane, mappedUrl, {
       note: result.preview_advertised_url
         ? t('preview.mappedFrom', { url: result.preview_advertised_url })
-        : '本机映射预览',
+        : t('preview.mappedNote'),
     });
   } else if (urlMatch) {
     let resolved = null;
