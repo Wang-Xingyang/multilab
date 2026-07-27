@@ -211,7 +211,7 @@ Current UI behavior:
 - captured preview output may include `MULTILAB_PREVIEW_HTML` or HTML body for sandboxed `iframe.srcdoc` rendering;
 - `MULTILAB_PREVIEW_URL=...` is rewritten to a host-local mapped URL when the active Docker kernel publishes that container port (`publish_ports`, bound to `127.0.0.1`); otherwise it remains text with guidance to use `gcc-ubuntu24-docker-net` and `security.network_required` / `security.preview_ports`.
 - Packages that need network or preview ports resolve to `gcc-ubuntu24-docker-net` (bridge + sandbox + published ports). Offline packages still require `network_default: none`.
-- `file-tree` panels render a center-left tree from `GET /api/fs/ls?tree=1` (workspace-scoped).
+- `file-tree` panels render a center-left tree from `GET /api/fs/ls?tree=1` (workspace-scoped). The tree auto-refreshes in real time: the host polls `find` in the kernel (~1s) via `RuntimeSession.watchFilesystem` and pushes a `type: "fs_change"` notification over the existing `/ws`; the frontend re-fetches `GET /api/fs/ls` on receipt. No extra kernel dependency — `find` ships with coreutils, so docker/WSL/SSH all work unchanged.
 
 ## Terminal Model
 

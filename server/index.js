@@ -603,6 +603,7 @@ wss.on('connection', (ws) => {
   // 点 ▶ 运行 = 先保存 workspace,再把 manifest command script 注入 shell stdin,
   // shell 自己回显命令、执行、回到提示符。Ctrl+C = 往 stdin 发 \x03。
   let terminal = null;
+  let fsWatcher = null;
 
   ws.send(JSON.stringify({ type: 'status', message: 'connected' }));
 
@@ -620,6 +621,16 @@ wss.on('connection', (ws) => {
           }
           terminal = null;
         },
+      });
+
+      // Host-side filesystem watcher: polls `find` in the kernel (~1s) and
+      // pushes a 'fs_change' notification over this same /ws when the set of
+      // file/dir paths changes. docker/WSL/SSH all work with zero extra deps
+      // (find ships with coreutils). Lifecycle is bound to this connection.
+      fsWatcher = getRuntimeSession().watchFilesystem(() => {
+        if (ws.readyState === ws.OPEN) {
+          ws.send(JSON.stringify({ type: 'fs_change' }));
+        }
       });
 
       ws.send(JSON.stringify({ type: 'ready' }));
@@ -691,6 +702,10 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     if (terminal) {
       terminal.close();
+    }
+    if (fsWatcher) {
+      fsWatcher.stop();
+      fsWatcher = null;
     }
   });
 });

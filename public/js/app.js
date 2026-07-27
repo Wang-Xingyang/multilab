@@ -4,7 +4,7 @@ import { toast } from './ui.js';
 import { initTheme } from './theme.js';
 import { renderTrustButton, selectKernelFromUi } from './kernel.js';
 import { initLayout } from './layout.js';
-import { initTerminal, initWS, reconnectWS, setTerminalActivityCallback } from './terminal.js';
+import { initTerminal, initWS, reconnectWS, setFileTreeChangeCallback } from './terminal.js';
 import {
   applyPanelLayout,
   setAuxTab,
@@ -34,7 +34,6 @@ import {
   renderFileTabs,
   syncEditorToCurrentFile,
 } from './files.js';
-import { startFileTreePolling } from './file-tree.js';
 import { runCode, runTest, runPreview } from './commands.js';
 import { initTrustDialog, openTrustDialog, closeTrustDialog, setPackageTrust } from './trust.js';
 import { appendSessionLog, renderLogsPane } from './session-log.js';
@@ -46,11 +45,9 @@ initTerminal();
 initWS();
 
 // 文件树自动刷新:
-// 1. 终端按回车 (执行命令) 或进程退出时即时刷新 (事件驱动)
-// 2. 4s 轮询兜底, 覆盖终端里任意手敲命令 (touch/rm/mkdir 等)
-// 3. 页面从后台切回时刷新一次
-setTerminalActivityCallback(() => refreshFileTree(false));
-startFileTreePolling();
+// 1. host 推送 fs_change (真实文件变化, ~1s) → 即时刷新
+// 2. 页面从后台切回时刷新一次 (兜底)
+setFileTreeChangeCallback(() => refreshFileTree(false));
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) refreshFileTree(false);
 });
@@ -218,8 +215,6 @@ document.getElementById('next-step').onclick = () => {
   }
 };
 document.getElementById('preview-btn').addEventListener('click', runPreview);
-document.getElementById('file-tree-refresh-btn').addEventListener('click', () => refreshFileTree(true));
-document.getElementById('file-tree-refresh-btn').title = t('files.refreshTree');
 document.getElementById('file-tree-collapse-btn').title = t('files.collapseTree');
 document.getElementById('tab-show-tree-btn').title = t('files.expandTree');
 function setFileTreeCollapsed(collapsed) {

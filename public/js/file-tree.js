@@ -5,17 +5,15 @@
  * setFileTreeOpenHandler so this module never imports files.js,
  * avoiding a circular dependency (files.js -> file-tree.js -> files.js).
  *
- * The tree auto-refreshes via two mechanisms:
- * 1. Event-driven: callers invoke refreshFileTree() after known FS mutations
- *    (save, step load, command completion, terminal exit).
- * 2. Polling: startFileTreePolling() runs a 4s interval that only fires when
- *    the tree is visible, expanded, page is focused, and WS is connected.
- *    This catches arbitrary terminal commands (touch/rm/mkdir) that have no
- *    explicit signal.
+ * The tree auto-refreshes via a real filesystem-change signal pushed from the
+ * host over the existing /ws (type 'fs_change'): the host polls `find` in the
+ * kernel and pushes a notification when the path set changes. Callers may also
+ * invoke refreshFileTree() directly after known local mutations (save, step
+ * load). A visibilitychange listener refreshes once when the tab refocuses.
  *
- * Both paths go through the same debounced entry point. A signature comparison
+ * All paths go through the same debounced entry point. A signature comparison
  * skips the DOM rebuild when the entry list is unchanged, preventing visual
- * noise and scroll jumps during polling.
+ * noise and scroll jumps.
  */
 import { state } from './state.js';
 import { apiGet } from './api.js';
@@ -64,10 +62,8 @@ export function renderFileTree(entries) {
 // ========== auto-refresh infrastructure ==========
 
 const REFRESH_DEBOUNCE_MS = 400;
-const POLL_INTERVAL_MS = 4000;
 
 let refreshTimer = null;
-let pollTimer = null;
 let lastSignature = '';
 
 /** Compact string fingerprint of the entry list for change detection. */
@@ -89,7 +85,7 @@ async function doRefreshFileTree(force = false) {
     const entries = data.entries || [];
     const sig = entriesSignature(entries);
     // Skip DOM rebuild when the tree structure hasn't changed — prevents
-    // scroll jumps and visual flicker during polling.
+    // scroll jumps and visual flicker.
     if (sig !== lastSignature) {
       lastSignature = sig;
       renderFileTree(entries);
@@ -124,31 +120,4 @@ export function refreshFileTree(force = false) {
     refreshTimer = null;
     doRefreshFileTree(false);
   }, REFRESH_DEBOUNCE_MS);
-}
-
-/**
- * Start a 4s polling interval that refreshes the file tree when:
- * - the page is visible (not in a background tab)
- * - the file-tree panel is declared and visible
- * - the tree is not collapsed
- * - the terminal WebSocket is connected
- *
- * Each tick only does cheap boolean checks; the actual fetch is debounced
- * and signature-gated, so the overhead is minimal when nothing changes.
- */
-export function startFileTreePolling() {
-  if (pollTimer) return;
-  pollTimer = setInterval(() => {
-    if (document.hidden) return;
-    if (state.fileTreeCollapsed) return;
-    if (!panelDeclared('file-tree')) return;
-    const treePanel = document.getElementById('file-tree-panel');
-    if (!treePanel || !treePanel.classList.contains('visible')) return;
-    if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
-    refreshFileTree(false);
-  }, POLL_INTERVAL_MS);
-}
-
-export function stopFileTreePolling() {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
 }
