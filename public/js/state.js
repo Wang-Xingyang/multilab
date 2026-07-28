@@ -28,6 +28,7 @@ export const state = {
 
 export const FALLBACK_PANELS = [
   { id: 'tutorial', type: 'tutorial', area: 'left' },
+  { id: 'files', type: 'file-tree', area: 'center-left' },
   { id: 'editor', type: 'editor', area: 'center' },
   { id: 'terminal', type: 'terminal', area: 'bottom' },
 ];

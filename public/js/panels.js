@@ -81,6 +81,8 @@ function applyPanelLayout() {
   treePanel.classList.toggle('visible', showFileTree);
   treePanel.classList.toggle('collapsed', treeCollapsed);
   dragTree.style.display = (showFileTree && !treeCollapsed) ? '' : 'none';
+  const showTreeBtn = document.getElementById('tab-show-tree-btn');
+  if (showTreeBtn) showTreeBtn.style.display = (showFileTree && treeCollapsed) ? '' : 'none';
   if (showFileTree && !treeCollapsed) {
     const body = document.getElementById('file-tree-body');
     if (!body.querySelector('.file-tree-item')) panelHooks.refreshTree?.(false);
