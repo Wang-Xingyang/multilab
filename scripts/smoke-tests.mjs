@@ -38,7 +38,13 @@ import {
   wipeBindMountViaExec,
 } from '../server/workspace/HostWorkspace.js';
 import { RuntimeProvider, RuntimeSession } from '../server/runtime/RuntimeProvider.js';
+import { RuntimeManager } from '../server/runtime/RuntimeManager.js';
 import { WslRuntimeProvider } from '../server/runtime/WslRuntimeProvider.js';
+import {
+  capturedTimeoutMs,
+  describeProbe,
+} from '../server/runtime/RuntimeContract.js';
+import { CommandService } from '../server/services/CommandService.js';
 import { displayLearnerPath, learnerShellEnv } from '../server/runtime/learnerShellEnv.js';
 import { MlabSaveArchiveService } from '../server/services/MlabSaveArchiveService.js';
 import { KernelSelectionStore } from '../server/services/KernelSelectionStore.js';
@@ -220,6 +226,11 @@ await test('KernelRegistry preferred kernel selection', () => {
 await test('WslRuntimeProvider is a 501 placeholder', async () => {
   const provider = new WslRuntimeProvider({ hostSavesDir: '/tmp/saves' });
   assert.equal(provider.kind, 'wsl');
+  assert.equal(provider.capabilities().implemented, false);
+  const probe = await provider.probe({ id: 'wsl-system-gcc' });
+  assert.equal(probe.ok, false);
+  assert.equal(probe.implemented, false);
+  assert.equal(probe.reason, 'provider_unimplemented');
   await assert.rejects(
     () => provider.startSession(),
     (error) => error.code === 'provider_unimplemented' && error.statusCode === 501
@@ -229,6 +240,93 @@ await test('WslRuntimeProvider is a 501 placeholder', async () => {
 await test('RuntimeSession.tempScriptPath lives on the session', () => {
   const session = new RuntimeSession();
   assert.equal(session.tempScriptPath('01-first-program', 'test'), '/tmp/01-first-program.test.sh');
+  assert.deepEqual(session.getPortMap(), {});
+});
+
+await test('capturedTimeoutMs reads timeout_sec', () => {
+  assert.equal(capturedTimeoutMs({ timeout_sec: 10 }), 10_000);
+  assert.equal(capturedTimeoutMs({}), 30_000);
+  assert.equal(capturedTimeoutMs({ timeout_sec: 0 }), 30_000);
+});
+
+await test('RuntimeManager incomplete provider fails at probe/plan', async () => {
+  const manager = new RuntimeManager({
+    providers: { local: new RuntimeProvider({ id: 'x', kind: 'local' }) },
+    kernelRegistry: { listKernels: () => [] },
+  });
+  await assert.rejects(
+    () => manager.probeKernel({ id: 'k', provider: 'local' }),
+    /probe/
+  );
+  await assert.rejects(
+    () => manager.ensureForKernel({ id: 'k', provider: 'local' }),
+    /planKernelSession/
+  );
+});
+
+await test('RuntimeManager ensureForKernel uses the provider contract', async () => {
+  const session = {
+    workspaceStrategy: null,
+    async ensure() {},
+    getPortMap() { return { 8080: 18080 }; },
+    async dispose() { this.disposed = true; },
+  };
+  const provider = {
+    id: 'fake',
+    kind: 'fake',
+    capabilities() { return { implemented: true }; },
+    async probe() { return describeProbe({ ok: true, ready: true, reason: 'fake' }); },
+    workspaceStrategy() { return describeRuntimeInternalStrategy({ location: '/ws' }); },
+    planKernelSession(kernel) {
+      return { fingerprint: `fake:${kernel.id}`, kernel, workspaceStrategy: this.workspaceStrategy(kernel) };
+    },
+    async applyKernel() { this.applied = true; },
+    async startSession() { return session; },
+  };
+  const manager = new RuntimeManager({
+    providers: { fake: provider },
+    kernelRegistry: { listKernels: () => [{ id: 'k1', provider: 'fake' }] },
+  });
+  const first = await manager.ensureForKernel({ id: 'k1', provider: 'fake' });
+  assert.equal(first.replaced, false);
+  assert.equal(provider.applied, true);
+  assert.equal(manager.describeSession().port_map[8080], 18080);
+  const probe = await manager.probeKernel({ id: 'k1', provider: 'fake' });
+  assert.equal(probe.ok, true);
+  const again = await manager.ensureForKernel({ id: 'k1', provider: 'fake' });
+  assert.equal(again.replaced, false);
+  assert.equal(again.session, session);
+});
+
+await test('CommandService passes captured timeout to the session', async () => {
+  const calls = [];
+  const session = {
+    tempScriptPath(step, command) { return `/tmp/${step}.${command}.sh`; },
+    async uploadScript() {},
+    async runCaptured(script, opts) {
+      calls.push({ script, opts });
+      return { stdout: 'ok', stderr: '', exitCode: 0 };
+    },
+    getPortMap() { return {}; },
+  };
+  const commandService = new CommandService({
+    packageService: {
+      async getStepCommandScript() {
+        return {
+          command: { id: 'test', type: 'test', terminal: 'captured', timeout_sec: 10 },
+          script: '#!/bin/bash\ntrue\n',
+        };
+      },
+    },
+    runtimeSession: session,
+  });
+  const result = await commandService.runCapturedCommand({
+    tutorial: 'hello-c',
+    step: '01-first-program',
+    command: 'test',
+  });
+  assert.equal(result.passed, true);
+  assert.equal(calls[0].opts.timeoutMs, 10_000);
 });
 
 await test('PackageService loads hello-c with ui_panels', async () => {

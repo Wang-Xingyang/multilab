@@ -1,14 +1,35 @@
 import { describeRuntimeInternalStrategy } from '../workspace/WorkspaceStrategy.js';
 import { createFindPollingWatcher } from '../workspace/FindPollingWatcher.js';
+import { describeCapabilities } from './RuntimeContract.js';
 
+/**
+ * RuntimeProvider / RuntimeSession contract.
+ *
+ * Required on every provider:
+ *   capabilities(kernel), probe(kernel), workspaceStrategy(kernel),
+ *   planKernelSession(kernel), applyKernel(kernel), startSession()
+ *
+ * Required on every session:
+ *   ensure, ensureWorkspace, writeFiles, readFiles, uploadScript,
+ *   runCaptured(script, { timeoutMs }), attachTerminal, interrupt, resize,
+ *   tempScriptPath, getPortMap, exec (fallback IO), watchFilesystem,
+ *   pointWorkspace (no-op unless bind-mount), dispose (no-op unless the
+ *   session object is being dropped)
+ *
+ * CommandService / SaveService must not import dockerode.
+ */
 export class RuntimeProvider {
   constructor({ id, kind }) {
     this.id = id;
     this.kind = kind;
   }
 
-  async startSession() {
-    throw new Error('RuntimeProvider.startSession() must be implemented');
+  capabilities() {
+    return describeCapabilities({ implemented: true });
+  }
+
+  async probe() {
+    throw new Error('RuntimeProvider.probe() must be implemented');
   }
 
   /**
@@ -21,11 +42,31 @@ export class RuntimeProvider {
       location: kernel?.workspace || this.workspaceDir,
     });
   }
+
+  planKernelSession(kernel) {
+    throw new Error('RuntimeProvider.planKernelSession() must be implemented');
+  }
+
+  async applyKernel() {
+    // Optional. Docker mutates the reused session from the planned kernel.
+  }
+
+  async startSession() {
+    throw new Error('RuntimeProvider.startSession() must be implemented');
+  }
 }
 
 export class RuntimeSession {
   async ensure() {
     throw new Error('RuntimeSession.ensure() must be implemented');
+  }
+
+  async ensureWorkspace() {
+    // Optional. Bind-mount providers create the save bind and align uids.
+  }
+
+  async exec() {
+    throw new Error('RuntimeSession.exec() must be implemented');
   }
 
   async writeFiles() {
@@ -60,6 +101,10 @@ export class RuntimeSession {
     return `/tmp/${stepId}.${commandId}.sh`;
   }
 
+  getPortMap() {
+    return {};
+  }
+
   async pointWorkspace() {
     // Optional. Bind-mount providers retarget /home/student/workspace at a save dir.
   }
@@ -78,5 +123,15 @@ export class RuntimeSession {
       workspaceDir: opts.workspaceDir || this.workspaceDir,
     });
   }
-}
 
+  async exportWorkspaceArchive() {
+    const error = new Error('workspace export is not supported by this runtime');
+    error.statusCode = 501;
+    throw error;
+  }
+
+  async dispose() {
+    // Optional. Docker reuses one session/container; dropping the manager
+    // handle must not stop the container.
+  }
+}

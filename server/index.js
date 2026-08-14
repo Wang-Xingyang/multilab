@@ -174,21 +174,12 @@ app.get('/api/diagnostics', async (req, res) => {
     const preferredKernelId = await kernelSelectionStore.getPreferredKernel(tutorial.package_digest);
     const resolution = kernelRegistry.resolveForPackage(tutorial, { preferredKernelId });
     let runtimePlan = null;
+    let probe = null;
     if (resolution.selected) {
-      const provider = runtimeManager.getProviderForKernel(resolution.selected);
-      runtimePlan = provider.planKernelSession
-        ? provider.planKernelSession(resolution.selected)
-        : null;
+      runtimePlan = runtimeManager.describePlan(resolution.selected);
+      probe = await runtimeManager.probeKernel(resolution.selected);
     }
-    let portMap = {};
-    let sessionReady = false;
-    try {
-      const session = runtimeManager.getSession();
-      sessionReady = Boolean(session);
-      portMap = typeof session.getPortMap === 'function' ? session.getPortMap() : {};
-    } catch {
-      sessionReady = false;
-    }
+    const { session_ready: sessionReady, port_map: portMap } = runtimeManager.describeSession();
     const active = runtimeManager.getActiveKernel();
     res.json({
       package: {
@@ -217,6 +208,7 @@ app.get('/api/diagnostics', async (req, res) => {
         active_fingerprint: runtimeManager.activeFingerprint,
         session_ready: sessionReady,
         port_map: portMap,
+        probe,
         workspace: workspaceService.describe(),
       },
     });
@@ -234,10 +226,7 @@ app.get('/api/kernels/resolve', async (req, res) => {
     const resolution = kernelRegistry.resolveForPackage(tutorial, { preferredKernelId });
     let runtime = null;
     if (resolution.selected) {
-      const provider = runtimeManager.getProviderForKernel(resolution.selected);
-      const plan = provider.planKernelSession
-        ? provider.planKernelSession(resolution.selected)
-        : null;
+      const plan = runtimeManager.describePlan(resolution.selected);
       const active = runtimeManager.getActiveKernel();
       runtime = {
         provider: resolution.selected.provider,
@@ -258,15 +247,7 @@ app.get('/api/kernels/resolve', async (req, res) => {
 app.get('/api/runtime', async (req, res) => {
   try {
     const active = runtimeManager.getActiveKernel();
-    let portMap = {};
-    let sessionReady = false;
-    try {
-      const session = runtimeManager.getSession();
-      sessionReady = Boolean(session);
-      portMap = typeof session.getPortMap === 'function' ? session.getPortMap() : {};
-    } catch {
-      sessionReady = false;
-    }
+    const { session_ready: sessionReady, port_map: portMap } = runtimeManager.describeSession();
     res.json({
       providers: runtimeManager.listProviders(),
       active_kernel: active,
@@ -287,10 +268,7 @@ app.post('/api/runtime/select', async (req, res) => {
       return res.status(400).json({ error: 'tutorial and kernel_id required' });
     }
     const selected = await runtimeManager.selectKernelForTutorial(tutorial, kernelId);
-    const provider = runtimeManager.getProviderForKernel(selected.kernel);
-    const plan = provider.planKernelSession
-      ? provider.planKernelSession(selected.kernel)
-      : selected.plan;
+    const plan = selected.plan || runtimeManager.describePlan(selected.kernel);
     res.json({
       tutorial,
       package_digest: selected.package_digest,

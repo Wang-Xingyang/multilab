@@ -60,6 +60,9 @@ export async function refreshDiagnosticsPane(tutorialKey) {
         <h4>Runtime session</h4>
         ${kv([
           ['ready', data.runtime?.session_ready ? 'yes' : 'no'],
+          ['probe', data.runtime?.probe
+            ? `${data.runtime.probe.ok ? 'ok' : 'not ready'} (${data.runtime.probe.reason || '—'})`
+            : '—'],
           ['active kernel', data.runtime?.active_kernel_id],
           ['fingerprint', data.runtime?.active_fingerprint],
           ['port map', JSON.stringify(data.runtime?.port_map || {})],

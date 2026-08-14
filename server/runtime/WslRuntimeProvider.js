@@ -1,15 +1,10 @@
 import { RuntimeProvider, RuntimeSession } from './RuntimeProvider.js';
 import { describeHostLocalStrategy, DEFAULT_WORKSPACE_LOCATION } from '../workspace/WorkspaceStrategy.js';
-
-function notImplemented(method) {
-  const error = new Error(
-    `WSL runtime provider is a placeholder; ${method} is not implemented yet`
-  );
-  error.statusCode = 501;
-  error.code = 'provider_unimplemented';
-  error.provider = 'wsl';
-  return error;
-}
+import {
+  describeCapabilities,
+  describeProbe,
+  unimplementedProviderError,
+} from './RuntimeContract.js';
 
 /**
  * Placeholder WSL provider. The session contract matches Docker/local:
@@ -25,6 +20,29 @@ export class WslRuntimeProvider extends RuntimeProvider {
     super({ id: 'wsl', kind: 'wsl' });
     this.workspaceDir = workspaceDir;
     this.hostSavesDir = hostSavesDir;
+  }
+
+  capabilities() {
+    return describeCapabilities({
+      implemented: false,
+      interactiveTerminal: true,
+      capturedCommands: true,
+      exec: true,
+      previewPorts: false,
+      workspaceRetarget: false,
+      nativeWatch: Boolean(this.hostSavesDir),
+    });
+  }
+
+  async probe(kernel = null) {
+    return describeProbe({
+      ok: false,
+      implemented: false,
+      ready: false,
+      reason: 'provider_unimplemented',
+      image: kernel?.image || null,
+      capabilities: this.capabilities(kernel),
+    });
   }
 
   planKernelSession(kernel) {
@@ -48,44 +66,48 @@ export class WslRuntimeProvider extends RuntimeProvider {
   }
 
   async applyKernel() {
-    throw notImplemented('applyKernel');
+    throw unimplementedProviderError('wsl', 'applyKernel');
   }
 
   async startSession() {
-    throw notImplemented('startSession');
+    throw unimplementedProviderError('wsl', 'startSession');
   }
 }
 
 export class WslRuntimeSession extends RuntimeSession {
   async ensure() {
-    throw notImplemented('ensure');
+    throw unimplementedProviderError('wsl', 'ensure');
   }
 
   async writeFiles() {
-    throw notImplemented('writeFiles');
+    throw unimplementedProviderError('wsl', 'writeFiles');
   }
 
   async readFiles() {
-    throw notImplemented('readFiles');
+    throw unimplementedProviderError('wsl', 'readFiles');
+  }
+
+  async exec() {
+    throw unimplementedProviderError('wsl', 'exec');
   }
 
   async uploadScript() {
-    throw notImplemented('uploadScript');
+    throw unimplementedProviderError('wsl', 'uploadScript');
   }
 
   async runCaptured() {
-    throw notImplemented('runCaptured');
+    throw unimplementedProviderError('wsl', 'runCaptured');
   }
 
   async attachTerminal() {
-    throw notImplemented('attachTerminal');
+    throw unimplementedProviderError('wsl', 'attachTerminal');
   }
 
   async interrupt() {
-    throw notImplemented('interrupt');
+    throw unimplementedProviderError('wsl', 'interrupt');
   }
 
   async resize() {
-    throw notImplemented('resize');
+    throw unimplementedProviderError('wsl', 'resize');
   }
 }

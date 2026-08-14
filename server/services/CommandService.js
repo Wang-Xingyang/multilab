@@ -1,5 +1,6 @@
 import { validateSafePath } from './PackageService.js';
 import { buildPreviewMeta } from './PreviewPortMap.js';
+import { capturedTimeoutMs } from '../runtime/RuntimeContract.js';
 
 export class CommandService {
   constructor({
@@ -33,13 +34,15 @@ export class CommandService {
 
     const remoteScript = session.tempScriptPath(step, command);
     await session.uploadScript(commandSpec.script, remoteScript);
-    const result = await session.runCaptured(remoteScript);
+    const result = await session.runCaptured(remoteScript, {
+      timeoutMs: capturedTimeoutMs(commandSpec.command),
+    });
     const passed = result.exitCode === 0;
     const progress = commandSpec.command.type === 'test' && this.saveService
       ? await this.saveService.recordTestResult(tutorial, step, passed)
       : null;
     const output = (result.stdout + (result.stderr ? '\n' + result.stderr : '')).trim();
-    const portMap = typeof session.getPortMap === 'function' ? session.getPortMap() : {};
+    const portMap = session.getPortMap();
     const previewMeta = commandSpec.command.type === 'preview'
       ? buildPreviewMeta(output, portMap)
       : {};

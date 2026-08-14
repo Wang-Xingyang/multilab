@@ -22,6 +22,9 @@ export class RuntimeManager {
     return Object.values(this.providers).map(provider => ({
       id: provider.id,
       kind: provider.kind,
+      capabilities: typeof provider.capabilities === 'function'
+        ? provider.capabilities()
+        : null,
     }));
   }
 
@@ -50,12 +53,35 @@ export class RuntimeManager {
     return this.activeKernel ? { ...this.activeKernel } : null;
   }
 
+  describePlan(kernel) {
+    if (!kernel) return null;
+    return this.getProviderForKernel(kernel).planKernelSession(kernel);
+  }
+
+  describeSession() {
+    try {
+      const session = this.getSession();
+      return {
+        session_ready: true,
+        port_map: session.getPortMap(),
+      };
+    } catch {
+      return { session_ready: false, port_map: {} };
+    }
+  }
+
+  async probeKernel(kernel) {
+    if (!kernel) return null;
+    return this.getProviderForKernel(kernel).probe(kernel);
+  }
+
   async ensureDefaultSession() {
     const kernels = this.kernelRegistry.listKernels();
     if (!kernels.length) {
       throw new Error('No kernels registered');
     }
-    return this.ensureForKernel(kernels[0]);
+    const implemented = kernels.find(kernel => kernel.implemented !== false) || kernels[0];
+    return this.ensureForKernel(implemented);
   }
 
   async ensureForTutorial(tutorialKey) {
@@ -111,9 +137,10 @@ export class RuntimeManager {
 
   async ensureForKernel(kernel) {
     const provider = this.getProviderForKernel(kernel);
-    const plan = provider.planKernelSession
-      ? provider.planKernelSession(kernel)
-      : { fingerprint: `${kernel.provider}:${kernel.id}`, kernel };
+    const plan = provider.planKernelSession(kernel);
+    const workspaceStrategy = plan.workspaceStrategy
+      || provider.workspaceStrategy(kernel)
+      || describeRuntimeInternalStrategy({ location: kernel.workspace });
 
     if (
       this.activeSession
@@ -127,28 +154,21 @@ export class RuntimeManager {
         provider,
         replaced: false,
         plan,
-        workspaceStrategy: this.activeSession.workspaceStrategy
-          || plan.workspaceStrategy
-          || (typeof provider.workspaceStrategy === 'function'
-            ? provider.workspaceStrategy(kernel)
-            : describeRuntimeInternalStrategy({ location: kernel.workspace })),
+        workspaceStrategy: this.activeSession.workspaceStrategy || workspaceStrategy,
       };
     }
 
-    if (typeof provider.applyKernel === 'function') {
-      await provider.applyKernel(kernel);
-    }
-
+    await provider.applyKernel(kernel);
     const session = await provider.startSession();
-    const workspaceStrategy = typeof provider.workspaceStrategy === 'function'
-      ? provider.workspaceStrategy(kernel)
-      : describeRuntimeInternalStrategy({ location: kernel.workspace });
     session.workspaceStrategy = workspaceStrategy;
     const replaced = Boolean(
       this.activeKernel && (
         this.activeKernel.id !== kernel.id || this.activeFingerprint !== plan.fingerprint
       )
     );
+    if (replaced && this.activeSession && this.activeSession !== session) {
+      await this.activeSession.dispose();
+    }
 
     this.activeKernel = { ...kernel };
     this.activeSession = session;

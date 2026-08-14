@@ -11,6 +11,7 @@ import { chooseDockerWorkspaceStrategy, SAVES_BIND_TARGET } from '../workspace/W
 import { ensureHostWorkspaceDir } from '../workspace/HostWorkspace.js';
 import { validateWorkspaceRelPath } from '../services/PackageService.js';
 import { learnerShellEnv, learnerProfileSnippet } from './learnerShellEnv.js';
+import { describeCapabilities, describeProbe } from './RuntimeContract.js';
 
 export class DockerRuntimeProvider extends RuntimeProvider {
   constructor({
@@ -82,6 +83,46 @@ export class DockerRuntimeProvider extends RuntimeProvider {
       bindTarget: SAVES_BIND_TARGET,
       mode: this.workspaceStrategyMode,
     });
+  }
+
+  capabilities(kernel = null) {
+    const strategy = this.workspaceStrategy(kernel);
+    return describeCapabilities({
+      implemented: true,
+      interactiveTerminal: true,
+      capturedCommands: true,
+      exec: true,
+      previewPorts: true,
+      workspaceRetarget: true,
+      nativeWatch: Boolean(strategy.capabilities?.nativeWatch),
+    });
+  }
+
+  async probe(kernel = null) {
+    const image = kernel?.image || this.image;
+    const capabilities = this.capabilities(kernel);
+    try {
+      const images = await this.docker.listImages();
+      const ready = images.some(img => (img.RepoTags || []).includes(image));
+      return describeProbe({
+        ok: ready,
+        implemented: true,
+        ready,
+        reason: ready ? 'image-present' : 'image-missing',
+        image,
+        capabilities,
+      });
+    } catch (error) {
+      return describeProbe({
+        ok: false,
+        implemented: true,
+        ready: false,
+        reason: 'docker-unavailable',
+        image,
+        details: error.message,
+        capabilities,
+      });
+    }
   }
 
   async applyKernel(kernel) {
@@ -355,8 +396,16 @@ done
     await this.#waitForExec(writeExec);
   }
 
-  async runCaptured(remoteScript) {
-    return this.exec(['bash', remoteScript]);
+  async runCaptured(remoteScript, { timeoutMs } = {}) {
+    const ms = Number(timeoutMs);
+    if (!Number.isFinite(ms) || ms <= 0) {
+      return this.exec(['bash', remoteScript]);
+    }
+    const seconds = Math.max(1, Math.ceil(ms / 1000));
+    return this.exec([
+      'timeout', '--signal=TERM', '--kill-after=2', String(seconds),
+      'bash', remoteScript,
+    ]);
   }
 
   async exportWorkspaceArchive() {

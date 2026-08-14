@@ -134,6 +134,7 @@ await test('diagnostics aggregates kernel/trust/runtime for hello-c', async () =
   assert.equal(body.resolution.selected.id, 'gcc-ubuntu24-docker');
   assert.equal(body.trust.trust, 'untrusted');
   assert.ok(body.runtime.image);
+  assert.equal(body.runtime.probe?.ok, true, `probe should find the OS image, got ${JSON.stringify(body.runtime.probe)}`);
 });
 
 // --- D. package library: pack -> upload -> list -> open -> delete ---

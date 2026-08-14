@@ -54,7 +54,7 @@ Docker runtime
   NetworkMode/security options from selected kernel
 ```
 
-Docker is the implemented provider. A WSL provider exists as a `501` placeholder (`WslRuntimeProvider`, kernel `wsl-system-gcc`, `implemented: false`) and is not auto-selected. `RuntimeManager` selects a provider from the resolved kernel's `provider` field, then asks that provider to apply kernel image/network/sandbox settings before starting a session.
+Docker is the implemented provider. A WSL provider exists as a `501` placeholder (`WslRuntimeProvider`, kernel `wsl-system-gcc`, `implemented: false`) and is not auto-selected. `RuntimeManager` selects a provider from the resolved kernel's `provider` field, then asks that provider to `planKernelSession`, `applyKernel`, and `startSession`. Every provider implements `probe(kernel)` and `capabilities()`; captured commands honor manifest `timeout_sec` through `RuntimeSession.runCaptured(script, { timeoutMs })`. `CommandService` / `SaveService` talk to this contract, not dockerode.
 
 The workspace is logically owned by MultiLab through `WorkspaceService`. The physical location and IO strategy are chosen by the runtime provider (`RuntimeProvider.workspaceStrategy`).
 
@@ -406,6 +406,7 @@ The UI shows a kernel selector for compatible candidates and a "重连终端" bu
 ## Known Limitations
 
 - Docker is the implemented provider; WSL is a registered `501` placeholder (`wsl-system-gcc`).
+- Runtime providers implement `probe`, `capabilities`, `planKernelSession`, `applyKernel`, and `startSession`. Sessions implement file IO, `exec`, captured command timeout, terminal, `getPortMap`, `pointWorkspace`, watch, and `dispose`.
 - Docker workspace strategy is `bind-mount` on Linux/WSL ext4 (saves tree → `/home/student/.mlab-saves`, workspace retargeted per step) and `runtime-internal` elsewhere. Volume-sync is not implemented.
 - File-tree watch uses host `fs.watch` on the bind source plus `find -H` polling so a workspace symlink still refreshes. The shell prompt maps `.mlab-saves/.../files` to `~/workspace`.
 - `.mlab` pack/unpack CLI, host-path import, and browser upload/open are implemented.
