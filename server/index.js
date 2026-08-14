@@ -14,11 +14,9 @@ import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { DockerRuntimeProvider } from './runtime/DockerRuntimeProvider.js';
 import { RuntimeManager } from './runtime/RuntimeManager.js';
-import {
-  PackageService,
-  validateFileName,
-} from './services/PackageService.js';
+import { PackageService } from './services/PackageService.js';
 import { SaveService } from './services/SaveService.js';
+import { WorkspaceService } from './services/WorkspaceService.js';
 import { CommandService } from './services/CommandService.js';
 import { TrustStore } from './services/TrustStore.js';
 import { createDefaultKernelRegistry } from './services/KernelRegistry.js';
@@ -74,9 +72,13 @@ const runtimeManager = new RuntimeManager({
   packageService,
   kernelSelectionStore,
 });
+const workspaceService = new WorkspaceService({
+  runtimeManager,
+  workspaceDir: WORKSPACE_DIR,
+});
 const saveService = new SaveService({
   runtimeStateDir: RUNTIME_STATE_DIR,
-  runtimeManager,
+  workspaceService,
   packageService,
 });
 const saveArchiveService = new MlabSaveArchiveService({ saveService });
@@ -206,6 +208,7 @@ app.get('/api/diagnostics', async (req, res) => {
         active_fingerprint: runtimeManager.activeFingerprint,
         session_ready: sessionReady,
         port_map: portMap,
+        workspace: workspaceService.describe(),
       },
     });
   } catch (e) {
@@ -261,6 +264,7 @@ app.get('/api/runtime', async (req, res) => {
       active_fingerprint: runtimeManager.activeFingerprint,
       session_ready: sessionReady,
       port_map: portMap,
+      workspace: workspaceService.describe(),
     });
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message });
@@ -425,15 +429,6 @@ app.post(
   }
 );
 
-function validateContainerPath(filePath) {
-  const input = filePath.startsWith('/') ? filePath : path.posix.join(WORKSPACE_DIR, filePath);
-  const resolved = path.posix.resolve(input);
-  if (resolved !== WORKSPACE_DIR && !resolved.startsWith(WORKSPACE_DIR + '/')) {
-    throw Object.assign(new Error('Access denied'), { statusCode: 403 });
-  }
-  return resolved;
-}
-
 // 单个教程详情 — 返回组装后的完整内容
 app.get('/api/tutorials/:id', async (req, res) => {
   try {
@@ -499,111 +494,41 @@ app.post('/api/commands/run', async (req, res) => {
   }
 });
 
-// ---------- 2. 容器文件系统 API ----------
-// 在容器中执行短命令并返回 stdout (非 TTY,非交互)
-async function containerExec(cmdArray, opts = {}) {
-  return getRuntimeSession().exec(cmdArray, opts);
-}
-
-// 列出工作区文件（默认扁平文件；tree=1 时返回有限深度目录树）
+// ---------- 2. Workspace filesystem API ----------
 app.get('/api/fs/ls', async (req, res) => {
   try {
-    const dir = validateContainerPath(req.query.path || WORKSPACE_DIR);
+    const dir = req.query.path || undefined;
     const wantTree = req.query.tree === '1' || req.query.tree === 'true';
     if (!wantTree) {
-      const r = await containerExec(
-        ['find', dir, '-maxdepth', '1', '-mindepth', '1', '-type', 'f', '-printf', '%f\n'],
-        { cwd: '/' }
-      );
-      if (r.exitCode !== 0) return res.status(500).json({ error: r.stderr || 'ls failed' });
-      const files = r.stdout.trim().split('\n').filter(Boolean).map(name => {
-        validateFileName(name);
-        return { name, type: 'file' };
-      });
-      return res.json({ path: dir, files });
+      return res.json(await workspaceService.listFiles({ dir }));
     }
-
-    const maxDepth = Math.min(6, Math.max(1, Number(req.query.depth) || 4));
-    const r = await containerExec(
-      [
-        'find', dir, '-maxdepth', String(maxDepth), '-mindepth', '1',
-        '(', '-type', 'f', '-o', '-type', 'd', ')',
-        '-printf', '%y\t%P\n',
-      ],
-      { cwd: '/' }
-    );
-    if (r.exitCode !== 0) return res.status(500).json({ error: r.stderr || 'ls tree failed' });
-    const entries = [];
-    for (const line of r.stdout.trim().split('\n').filter(Boolean)) {
-      const tab = line.indexOf('\t');
-      if (tab < 0) continue;
-      const kind = line.slice(0, tab);
-      const rel = line.slice(tab + 1);
-      if (!rel || rel.includes('\0') || rel.split('/').some(part => part === '..')) continue;
-      const abs = path.posix.join(dir, rel);
-      validateContainerPath(abs);
-      entries.push({
-        name: path.posix.basename(rel),
-        path: abs,
-        relative: rel,
-        type: kind === 'd' ? 'dir' : 'file',
-      });
-    }
-    // Tree-aware sort: children 紧跟父目录, 同级目录优先于文件, 同类按名字。
-    // 逐级比较路径组件;分叉处查该级路径是否为目录(dir 优先);父子关系父在前。
-    const dirRels = new Set(entries.filter(e => e.type === 'dir').map(e => e.relative));
-    entries.sort((a, b) => {
-      const pa = a.relative.split('/');
-      const pb = b.relative.split('/');
-      const len = Math.min(pa.length, pb.length);
-      for (let i = 0; i < len; i++) {
-        if (pa[i] !== pb[i]) {
-          const aIsDir = dirRels.has(pa.slice(0, i + 1).join('/'));
-          const bIsDir = dirRels.has(pb.slice(0, i + 1).join('/'));
-          if (aIsDir !== bIsDir) return aIsDir ? -1 : 1;
-          return pa[i].localeCompare(pb[i]);
-        }
-      }
-      return pa.length - pb.length; // 父(短路径)在前
-    });
-    res.json({ path: dir, tree: true, depth: maxDepth, entries });
+    res.json(await workspaceService.listTree({ dir, depth: req.query.depth }));
   } catch (e) { res.status(e.statusCode || 500).json({ error: e.message }); }
 });
 
-// 读取文件
 app.post('/api/fs/read', async (req, res) => {
   try {
     const filePath = req.body.path;
     if (!filePath) return res.status(400).json({ error: 'path required' });
-    validateContainerPath(filePath);
-    // 用 od+sed 确保二进制安全,或直接用 cat (非 TTY 模式)
-    const r = await containerExec(['cat', filePath]);
-    if (r.exitCode !== 0) return res.status(500).json({ error: r.stderr || 'read failed' });
-    res.json({ path: filePath, content: r.stdout });
+    res.json(await workspaceService.readFile(filePath));
   } catch (e) { res.status(e.statusCode || 500).json({ error: e.message }); }
 });
 
-// 保存文件
 app.post('/api/fs/write', async (req, res) => {
   try {
     const { path: filePath, content } = req.body;
     if (!filePath) return res.status(400).json({ error: 'path required' });
-    validateContainerPath(filePath);
-    await getRuntimeSession().uploadScript(content, filePath);
-    res.json({ path: filePath, saved: true });
+    res.json(await workspaceService.writeFile(filePath, content));
   } catch (e) { res.status(e.statusCode || 500).json({ error: e.message }); }
 });
 
-// ---------- 2.5 Workspace export ----------
-
-// 导出工作区为 tar.gz
 app.get('/api/workspace/export', async (req, res) => {
   try {
-    const buf = await getRuntimeSession().exportWorkspaceArchive();
+    const buf = await workspaceService.exportArchive();
     res.setHeader('Content-Type', 'application/gzip');
     res.setHeader('Content-Disposition', 'attachment; filename="workspace.tar.gz"');
     res.send(buf);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(e.statusCode || 500).json({ error: e.message }); }
 });
 
 // ---------- 3. WebSocket: 转发到 exec 流 ----------
@@ -636,11 +561,10 @@ wss.on('connection', (ws) => {
         },
       });
 
-      // Host-side filesystem watcher: polls `find` in the kernel (~1s) and
-      // pushes a 'fs_change' notification over this same /ws when the set of
-      // file/dir paths changes. docker/WSL/SSH all work with zero extra deps
-      // (find ships with coreutils). Lifecycle is bound to this connection.
-      fsWatcher = getRuntimeSession().watchFilesystem(() => {
+      // Workspace-owned filesystem watcher. Current Docker strategy uses the
+      // find-polling fallback (~1s) and pushes fs_change over this /ws.
+      // Lifecycle is bound to this connection.
+      fsWatcher = workspaceService.watch(() => {
         if (ws.readyState === ws.OPEN) {
           ws.send(JSON.stringify({ type: 'fs_change' }));
         }

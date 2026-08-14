@@ -13,14 +13,10 @@ For the full target product architecture, see:
 MultiLab is an interactive tutorial player:
 
 ```text
-tutorial package
-  declares content, steps, commands, runtime requirements, and panels
-
-MultiLab host
-  loads packages, manages saves, selects/runs commands, and renders the UI
-
-runtime session
-  executes commands and provides a terminal, currently through Docker
+tutorial package   read-only learning material (template files, scripts, markdown)
+save bundle        durable learner-owned state (files + save.json)
+live workspace     scratch copy the learner edits and the runtime executes against
+runtime session    disposable execution environment (currently Docker)
 ```
 
 The current code is still a compact prototype, but new work should follow this direction.
@@ -41,6 +37,7 @@ Node host
   PackageLibrary
   PanelModel
   SaveService
+  WorkspaceService
   MlabSaveArchiveService
   CommandService
   SecurityPolicyService
@@ -58,6 +55,8 @@ Docker runtime
 ```
 
 Docker is currently the only implemented provider. `RuntimeManager` selects a provider from the resolved kernel's `provider` field, then asks that provider to apply kernel image/network/sandbox settings before starting a session.
+
+The live workspace is logically owned by MultiLab through `WorkspaceService`. The physical location and IO strategy are chosen by the runtime provider (`RuntimeProvider.workspaceStrategy`). Current Docker kernels use `runtime-internal`: files live inside the container and are copied in/out through `RuntimeSession`. That is a fallback, not the target. Later strategies may use Linux bind mounts, Docker Desktop volume/sync, WSL ext4, or a trusted-only host-local workspace. Runtime kernels provide execution capability; they should not require a MultiLab-specific in-kernel agent.
 
 ## Tutorial Loading
 
@@ -211,7 +210,7 @@ Current UI behavior:
 - captured preview output may include `MULTILAB_PREVIEW_HTML` or HTML body for sandboxed `iframe.srcdoc` rendering;
 - `MULTILAB_PREVIEW_URL=...` is rewritten to a host-local mapped URL when the active Docker kernel publishes that container port (`publish_ports`, bound to `127.0.0.1`); otherwise it remains text with guidance to use `gcc-ubuntu24-docker-net` and `security.network_required` / `security.preview_ports`.
 - Packages that need network or preview ports resolve to `gcc-ubuntu24-docker-net` (bridge + sandbox + published ports). Offline packages still require `network_default: none`.
-- `file-tree` panels render a center-left tree from `GET /api/fs/ls?tree=1` (workspace-scoped). The tree auto-refreshes in real time: the host polls `find` in the kernel (~1s) via `RuntimeSession.watchFilesystem` and pushes a `type: "fs_change"` notification over the existing `/ws`; the frontend re-fetches `GET /api/fs/ls` on receipt. No extra kernel dependency — `find` ships with coreutils, so docker/WSL/SSH all work unchanged.
+- `file-tree` panels render a center-left tree from `GET /api/fs/ls?tree=1` (workspace-scoped). The tree auto-refreshes in real time: `WorkspaceService.watch` uses the current strategy's watcher and pushes `type: "fs_change"` over `/ws`; the frontend re-fetches `GET /api/fs/ls` on receipt. Docker currently uses the find-polling fallback (~1s via `RuntimeSession.exec`). Providers may later replace that with native watch. No MultiLab-specific kernel agent is required — `find` ships with coreutils.
 
 ## Terminal Model
 
@@ -235,9 +234,9 @@ Docker hijack streams are decoded with dockerode's `container.modem.demuxStream(
 
 Each step has:
 
-- `template`: package files under `steps/<id>/files/`;
-- `save`: local saved files for the learner;
-- `workspace`: files currently present in the runtime session;
+- `template`: package files under `steps/<id>/files/` (read-only);
+- `save`: durable learner files for this step, owned by `SaveService`;
+- `workspace`: live scratch files currently present for editing and execution, owned by `WorkspaceService`;
 - `inherit_mode`: first-entry initialization rule.
 
 Supported `inherit_mode` values:
@@ -255,7 +254,9 @@ overlay_template
 
 Current implementation intentionally does not overwrite learner files during `overlay_template`.
 
-Step load/save/reset is handled by `server/services/SaveService.js`. It owns save identity paths, host save file IO, first-entry inheritance, reset behavior, and workspace synchronization through `RuntimeSession`.
+Step load/save/reset is handled by `server/services/SaveService.js`. It owns save identity paths, host save file IO, first-entry inheritance, reset behavior, and progress metadata. It asks `WorkspaceService` to sync template/save files into the live workspace and to snapshot the live workspace back into the save directory.
+
+`WorkspaceService` owns workspace initialization, scoped file IO (`/api/fs/*`), snapshot, export, and watch. File APIs and the WebSocket `fs_change` watcher go through this service rather than talking to Docker directly. The current Docker provider still copies files through `RuntimeSession.writeFiles` / `readFiles`; bind-mount is not enabled yet.
 
 ## Save Storage
 
@@ -315,7 +316,7 @@ Do not use Git as the live step state machine.
 Current practical protections:
 
 - code runs as non-root `student`;
-- file APIs restrict paths to `/home/student/workspace`;
+- file APIs restrict paths to the live workspace root (`/home/student/workspace` for current Docker kernels);
 - tutorial scripts are loaded from package paths after path validation;
 - test/check commands run inside the Docker runtime, not on the host.
 - package trust defaults to `untrusted` and is stored by package digest under `.multilab-state/trust.json`.
@@ -382,6 +383,8 @@ The UI shows a kernel selector for compatible candidates and a "重连终端" bu
 ## Known Limitations
 
 - Docker is still the only implemented provider.
+- Current Docker workspace strategy is `runtime-internal` (copy in/out via exec). Bind-mount / volume-sync / host-local strategies are not implemented.
+- File-tree watch uses find-polling as a WorkspaceService fallback, not a native watcher.
 - `.mlab` pack/unpack CLI, host-path import, and browser upload/open are implemented.
 - `.mlab-save` host-path export/import and browser upload/download are implemented.
 - Kernel registry is static and only contains the default Docker kernel.

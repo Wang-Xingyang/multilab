@@ -9,17 +9,16 @@ import {
 } from './PackageService.js';
 
 export class SaveService {
-  constructor({ runtimeStateDir, runtimeSession = null, runtimeManager = null, packageService }) {
+  constructor({ runtimeStateDir, workspaceService, packageService }) {
     this.runtimeStateDir = runtimeStateDir;
-    this.runtimeSession = runtimeSession;
-    this.runtimeManager = runtimeManager;
+    this.workspaceService = workspaceService;
     this.packageService = packageService;
   }
 
   async loadStepState(tutorialId, stepId) {
     validateSafePath(tutorialId);
     validateSafePath(stepId);
-    await this.ensureRuntimeDirs(tutorialId);
+    await this.ensureSaveRootDirs();
     const cfg = await this.packageService.loadTutorial(tutorialId);
     const step = findStep(cfg, stepId);
     const ownSaveDir = this.saveDir(cfg, step.id);
@@ -69,7 +68,7 @@ export class SaveService {
       }
     }
 
-    await this.writeFilesToWorkspace(files);
+    await this.workspaceService.syncFromFiles(files, { tutorialId });
     const progress = await this.recordStepVisit(cfg, step.id);
     return {
       tutorial: tutorialId,
@@ -85,7 +84,7 @@ export class SaveService {
   async saveStepState(tutorialId, stepId, files) {
     validateSafePath(tutorialId);
     validateSafePath(stepId);
-    await this.ensureRuntimeDirs(tutorialId);
+    await this.ensureSaveRootDirs();
     const cfg = await this.packageService.loadTutorial(tutorialId);
     const step = findStep(cfg, stepId);
     const dest = this.saveDir(cfg, step.id);
@@ -94,8 +93,9 @@ export class SaveService {
       name: validateFileName(f.name || 'untitled'),
       content: f.content || '',
     }));
-    if (providedFiles) await this.writeFilesToWorkspace(normalizedFiles, { clear: false });
-    const workspaceFiles = await this.loadWorkspaceFiles();
+    await this.workspaceService.ensure({ tutorialId });
+    if (providedFiles) await this.workspaceService.writeFiles(normalizedFiles, { clear: false });
+    const workspaceFiles = await this.workspaceService.snapshot();
     await writeHostFiles(dest, workspaceFiles);
     const progress = await this.recordStepVisit(cfg, step.id);
     return { tutorial: tutorialId, step: step.id, hasOwnSave: true, progress };
@@ -104,13 +104,13 @@ export class SaveService {
   async resetStepState(tutorialId, stepId) {
     validateSafePath(tutorialId);
     validateSafePath(stepId);
-    await this.ensureRuntimeDirs(tutorialId);
+    await this.ensureSaveRootDirs();
     const cfg = await this.packageService.loadTutorial(tutorialId);
     const step = findStep(cfg, stepId);
     const dest = this.saveDir(cfg, step.id);
     await writeStepTemplateToDir(step, dest);
     const files = await readHostFiles(dest);
-    await this.writeFilesToWorkspace(files);
+    await this.workspaceService.syncFromFiles(files, { tutorialId });
     const progress = await this.recordStepVisit(cfg, step.id);
     return {
       tutorial: tutorialId,
@@ -121,28 +121,8 @@ export class SaveService {
     };
   }
 
-  async ensureRuntimeDirs(tutorialId = null) {
-    await this.ensureSaveRootDirs();
-    const session = await this.resolveRuntimeSession(tutorialId);
-    await session.ensureWorkspace();
-  }
-
   async ensureSaveRootDirs() {
     await fs.mkdir(path.join(this.runtimeStateDir, 'saves'), { recursive: true });
-  }
-
-  async resolveRuntimeSession(tutorialId = null) {
-    if (this.runtimeManager) {
-      if (tutorialId) {
-        const ensured = await this.runtimeManager.ensureForTutorial(tutorialId);
-        return ensured.session;
-      }
-      return this.runtimeManager.getSession();
-    }
-    if (!this.runtimeSession) {
-      throw Object.assign(new Error('runtime session is not ready'), { statusCode: 503 });
-    }
-    return this.runtimeSession;
   }
 
   saveDir(cfg, stepId) {
@@ -324,29 +304,6 @@ export class SaveService {
       progress,
       steps: Array.from(stepFiles.keys()).sort(),
     };
-  }
-
-  async loadWorkspaceFiles() {
-    const session = await this.resolveRuntimeSession();
-    const files = await session.readFiles();
-    return files.map(file => {
-      const name = validateFileName(file.name);
-      const ext = path.extname(name).toLowerCase();
-      return {
-        name,
-        content: file.content,
-        language: LANG_BY_EXT[ext] || 'plaintext',
-      };
-    });
-  }
-
-  async writeFilesToWorkspace(files, opts = {}) {
-    const session = await this.resolveRuntimeSession();
-    const normalizedFiles = (files || []).map(f => {
-      const name = validateFileName(f.name || 'untitled');
-      return { name, content: f.content || '' };
-    });
-    await session.writeFiles(normalizedFiles, opts);
   }
 }
 

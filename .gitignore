@@ -27,8 +27,8 @@ Thumbs.db
 # Docker
 docker/data/
 
-# Workspace (用户工作区,不入 git)
-workspace/
+# Learner workspace dumps at repo root (not source under server/workspace/)
+/workspace/
 sessions/
 .multilab-state/
 

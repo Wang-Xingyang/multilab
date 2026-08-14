@@ -1,3 +1,5 @@
+import { describeRuntimeInternalStrategy } from '../workspace/WorkspaceStrategy.js';
+
 export class RuntimeManager {
   constructor({ providers = {}, kernelRegistry, packageService = null, kernelSelectionStore = null }) {
     this.providers = { ...providers };
@@ -125,6 +127,11 @@ export class RuntimeManager {
         provider,
         replaced: false,
         plan,
+        workspaceStrategy: this.activeSession.workspaceStrategy
+          || plan.workspaceStrategy
+          || (typeof provider.workspaceStrategy === 'function'
+            ? provider.workspaceStrategy(kernel)
+            : describeRuntimeInternalStrategy({ location: kernel.workspace })),
       };
     }
 
@@ -133,6 +140,10 @@ export class RuntimeManager {
     }
 
     const session = await provider.startSession();
+    const workspaceStrategy = typeof provider.workspaceStrategy === 'function'
+      ? provider.workspaceStrategy(kernel)
+      : describeRuntimeInternalStrategy({ location: kernel.workspace });
+    session.workspaceStrategy = workspaceStrategy;
     const replaced = Boolean(
       this.activeKernel && (
         this.activeKernel.id !== kernel.id || this.activeFingerprint !== plan.fingerprint
@@ -149,6 +160,7 @@ export class RuntimeManager {
       provider,
       replaced,
       plan,
+      workspaceStrategy,
     };
   }
 }

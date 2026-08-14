@@ -17,6 +17,7 @@ This repository is an early prototype of the MultiLab host:
 - security: digest-keyed trust store (default `untrusted`) and command-time security policy gates;
 - kernels/runtime: static `KernelRegistry` with offline `gcc-ubuntu24-docker` and networked `gcc-ubuntu24-docker-net` (localhost port publish); `RuntimeManager` binds the selected kernel to a provider and applies Docker network/sandbox/port settings; UI can pick a compatible kernel and reconnect the terminal;
 - saves: versioned step files plus `save.json` progress metadata under `.multilab-state/saves/`;
+- workspace: `WorkspaceService` owns the live scratch copy; current Docker kernels still use a runtime-internal workspace (copy in/out), not bind-mount;
 - panels: manifest `default_panels` drive tutorial/terminal/file-tree visibility plus test-results/web-preview/logs/diagnostics aux panels; progress strip uses `save.json`; trust changes go through a confirmation dialog;
 - checks: `npm run test:smoke` runs a Docker-free service smoke suite.
 
@@ -207,4 +208,4 @@ python3 docs/tutorial-skill/scripts/unpack_mlab.py /tmp/hello-c.mlab -o /tmp/hel
 - New execution should go through manifest `commands[]`.
 - Docker is the first official runtime provider, not the permanent architecture boundary.
 - Keep trust defaulting to untrusted and network defaulting to denied unless a package explicitly requires it.
-- Prefer service boundaries: PackageService, PackageLibrary, SaveService, CommandService, SecurityPolicyService, TrustStore, KernelRegistry.
+- Prefer service boundaries: PackageService, PackageLibrary, SaveService, WorkspaceService, CommandService, SecurityPolicyService, TrustStore, KernelRegistry.

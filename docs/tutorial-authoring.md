@@ -124,6 +124,8 @@ overlay_template
 
 Current implementation does not overwrite learner files during `overlay_template`.
 
+Package template files are read-only learning material. Learner edits live in the workspace and persist into the save. Command scripts still run against the runtime workspace path (currently `/home/student/workspace` for Docker kernels).
+
 ## Commands
 
 Commands are declared in `multilab.json`; scripts live in real files.

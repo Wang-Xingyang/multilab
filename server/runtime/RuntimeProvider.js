@@ -1,3 +1,6 @@
+import { describeRuntimeInternalStrategy } from '../workspace/WorkspaceStrategy.js';
+import { createFindPollingWatcher } from '../workspace/FindPollingWatcher.js';
+
 export class RuntimeProvider {
   constructor({ id, kind }) {
     this.id = id;
@@ -6,6 +9,17 @@ export class RuntimeProvider {
 
   async startSession() {
     throw new Error('RuntimeProvider.startSession() must be implemented');
+  }
+
+  /**
+   * Describe how this provider places the live learner workspace for a kernel.
+   * Default is runtime-internal (files inside the session, IO via exec).
+   * Providers may return bind-mount / volume-sync / host-local instead.
+   */
+  workspaceStrategy(kernel) {
+    return describeRuntimeInternalStrategy({
+      location: kernel?.workspace || this.workspaceDir,
+    });
   }
 }
 
@@ -43,67 +57,18 @@ export class RuntimeSession {
   }
 
   /**
-   * Watch the workspace filesystem for structural changes (add / delete /
-   * rename of files or directories). The default implementation polls `find`
-   * via exec() — works for any provider whose environment ships coreutils
-   * (docker / WSL / SSH). Providers with a faster native mechanism (e.g. a
-   * local provider using fs.watch, or an image that opts into inotify) may
-   * override this method; the contract (return { stop }) stays the same.
-   *
-   * onChange() is invoked when the set of file/dir paths changes. Content
-   * edits to an existing file do NOT fire onChange — the file tree only
-   * reflects structure, not contents.
+   * Watch the workspace filesystem for structural changes. Default is the
+   * find-polling fallback owned by WorkspaceService. Providers with native
+   * watch should override this method; the contract (return { stop }) stays
+   * the same.
    *
    * @returns {{ stop: () => void }}
    */
-  watchFilesystem(onChange, { intervalMs = 1000, maxDepth = 6 } = {}) {
-    if (typeof onChange !== 'function') {
-      throw new TypeError('watchFilesystem: onChange must be a function');
-    }
-    if (!this.workspaceDir) {
-      throw new Error('watchFilesystem: session.workspaceDir is required by the default polling implementation');
-    }
-    const cmd = [
-      'find', this.workspaceDir,
-      '-maxdepth', String(maxDepth), '-mindepth', '1',
-      '(', '-type', 'f', '-o', '-type', 'd', ')',
-      '-printf', '%y\t%P\n',
-    ];
-
-    let timer = null;
-    let lastSignature = null;
-    let inFlight = false;
-    let stopped = false;
-
-    const tick = async () => {
-      if (stopped || inFlight) return;
-      inFlight = true;
-      try {
-        const r = await this.exec(cmd, { cwd: '/' });
-        if (stopped) return;
-        if (r.exitCode !== 0) return; // transient (container restarting, etc.)
-        const sig = r.stdout;
-        if (lastSignature !== null && sig !== lastSignature) {
-          onChange();
-        }
-        lastSignature = sig;
-      } catch {
-        // swallow — next tick retries
-      } finally {
-        inFlight = false;
-      }
-    };
-
-    // Seed the signature immediately, then poll.
-    tick();
-    timer = setInterval(tick, intervalMs);
-
-    return {
-      stop() {
-        stopped = true;
-        if (timer) { clearInterval(timer); timer = null; }
-      },
-    };
+  watchFilesystem(onChange, opts = {}) {
+    return createFindPollingWatcher(this, onChange, {
+      ...opts,
+      workspaceDir: opts.workspaceDir || this.workspaceDir,
+    });
   }
 }
 

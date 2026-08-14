@@ -16,6 +16,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { spawn } from 'child_process';
+import { createWriteStream } from 'fs';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 
@@ -191,17 +192,35 @@ await test('save export/import roundtrip restores progress', async () => {
 });
 
 await test('save import with missing package returns package_missing', async () => {
-  // point import at a save archive whose package identity is not installed
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'ml-e2e-missing-'));
-  const exportPath = path.join(tmp, 'progress.mlab-save');
-  // export hello-c save, then rewrite save.json package identity to a fake digest
-  await apiJson('/api/saves/export', { tutorial: 'hello-c', path: exportPath });
-  // We can't easily rewrite the zip; instead call host-path import with a bogus path
-  // to confirm error shape. Skip if not reproducible without a crafted archive.
+  const archivePath = path.join(tmp, 'orphan.mlab-save');
+  const yazl = require(path.join(ROOT, 'server/node_modules/yazl'));
+  const zipFile = new yazl.ZipFile();
+  const saveJson = JSON.stringify({
+    package: {
+      id: 'hello-c',
+      version: '1.0.0',
+      digest: `sha256:${'a'.repeat(64)}`,
+    },
+    current_step: '01-first-program',
+    visited: ['01-first-program'],
+    test_passed: {},
+  }, null, 2) + '\n';
+  zipFile.addBuffer(Buffer.from(saveJson), 'save.json');
+  zipFile.addBuffer(Buffer.from('int main(){return 0;}\n'), 'steps/01-first-program/files/hello.c');
+  await new Promise((resolve, reject) => {
+    const output = createWriteStream(archivePath);
+    output.on('close', resolve);
+    output.on('error', reject);
+    zipFile.outputStream.on('error', reject);
+    zipFile.outputStream.pipe(output);
+    zipFile.end();
+  });
+  const { status, body } = await apiJson('/api/saves/import', { path: archivePath });
+  assert.equal(status, 404, `expected 404, got ${status} ${JSON.stringify(body)}`);
+  assert.equal(body.code, 'package_missing');
+  assert.equal(body.package?.id, 'hello-c');
   await fs.rm(tmp, { recursive: true, force: true });
-  // Lightweight: confirm /api/saves/import rejects a non-existent path with an error.
-  const { body } = await apiJson('/api/saves/import', { path: path.join(tmp, 'does-not-exist.mlab-save') });
-  assert.ok(body.error, 'expected error for missing file');
 });
 
 // --- E. fs tree ---

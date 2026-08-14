@@ -17,6 +17,17 @@ import { normalizePanels, FALLBACK_PANELS } from '../server/services/PanelModel.
 import { createDefaultKernelRegistry, packageNeedsNetwork } from '../server/services/KernelRegistry.js';
 import { PackageService } from '../server/services/PackageService.js';
 import { SaveService } from '../server/services/SaveService.js';
+import {
+  WorkspaceService,
+  parseFindTreeOutput,
+  sortWorkspaceTreeEntries,
+} from '../server/services/WorkspaceService.js';
+import { createFindPollingWatcher } from '../server/workspace/FindPollingWatcher.js';
+import {
+  WORKSPACE_STRATEGY_KINDS,
+  describeRuntimeInternalStrategy,
+} from '../server/workspace/WorkspaceStrategy.js';
+import { RuntimeProvider } from '../server/runtime/RuntimeProvider.js';
 import { MlabSaveArchiveService } from '../server/services/MlabSaveArchiveService.js';
 import { KernelSelectionStore } from '../server/services/KernelSelectionStore.js';
 import { sanitizeUploadFilename } from '../server/services/TempArchiveUpload.js';
@@ -36,6 +47,58 @@ const TUTORIALS_DIR = path.resolve(ROOT, '../tutorials');
 
 let passed = 0;
 let failed = 0;
+
+function createMemoryWorkspaceSession(initialFiles = []) {
+  const files = new Map(initialFiles.map(file => [file.name, file.content || '']));
+  const session = {
+    workspaceDir: '/home/student/workspace',
+    async ensureWorkspace() {},
+    async writeFiles(next, opts = {}) {
+      if (opts.clear !== false) files.clear();
+      for (const file of next || []) files.set(file.name, file.content || '');
+    },
+    async readFiles() {
+      return [...files.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([name, content]) => ({ name, content }));
+    },
+    async uploadScript(content, filePath) {
+      const name = String(filePath || '').split('/').pop();
+      files.set(name, content ?? '');
+    },
+    async exec(cmd) {
+      const [bin, ...args] = cmd;
+      if (bin === 'find') {
+        const printfIdx = args.indexOf('-printf');
+        const format = printfIdx >= 0 ? args[printfIdx + 1] : '%f\n';
+        const names = [...files.keys()].sort();
+        if (String(format).includes('%y')) {
+          return { stdout: names.map(name => `f\t${name}\n`).join(''), stderr: '', exitCode: 0 };
+        }
+        return { stdout: names.map(name => `${name}\n`).join(''), stderr: '', exitCode: 0 };
+      }
+      if (bin === 'cat') {
+        const name = String(args[0] || '').split('/').pop();
+        if (!files.has(name)) return { stdout: '', stderr: 'not found', exitCode: 1 };
+        return { stdout: files.get(name), stderr: '', exitCode: 0 };
+      }
+      return { stdout: '', stderr: 'unsupported', exitCode: 1 };
+    },
+  };
+  return { session, files };
+}
+
+function createSaveService(tmp, extraFiles = []) {
+  const packageService = new PackageService({ tutorialsDir: TUTORIALS_DIR });
+  const { session, files } = createMemoryWorkspaceSession(extraFiles);
+  const workspaceService = new WorkspaceService({ runtimeSession: session });
+  const saveService = new SaveService({
+    runtimeStateDir: path.join(tmp, 'state'),
+    workspaceService,
+    packageService,
+  });
+  return { packageService, saveService, workspaceService, session, files };
+}
 
 async function test(name, fn) {
   try {
@@ -114,16 +177,7 @@ await test('PackageService loads hello-c with ui_panels', async () => {
 await test('Save archive export/import roundtrip', async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-smoke-'));
   try {
-    const packageService = new PackageService({ tutorialsDir: TUTORIALS_DIR });
-    const saveService = new SaveService({
-      runtimeStateDir: path.join(tmp, 'state'),
-      runtimeSession: {
-        async ensureWorkspace() {},
-        async readFiles() { return []; },
-        async writeFiles() {},
-      },
-      packageService,
-    });
+    const { saveService, packageService } = createSaveService(tmp);
     const archiveService = new MlabSaveArchiveService({ saveService });
     const cfg = await packageService.loadTutorial('hello-c');
     const root = saveService.packageSaveRoot(cfg);
@@ -149,16 +203,7 @@ await test('Save archive export/import roundtrip', async () => {
 await test('SaveService.getProgress reads progress without overwriting current_step', async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-smoke-'));
   try {
-    const packageService = new PackageService({ tutorialsDir: TUTORIALS_DIR });
-    const saveService = new SaveService({
-      runtimeStateDir: path.join(tmp, 'state'),
-      runtimeSession: {
-        async ensureWorkspace() {},
-        async readFiles() { return []; },
-        async writeFiles() {},
-      },
-      packageService,
-    });
+    const { saveService, packageService } = createSaveService(tmp);
     const cfg = await packageService.loadTutorial('hello-c');
     // Fresh tutorial: getProgress must return defaults and NOT create save.json.
     const fresh = await saveService.getProgress(cfg);
@@ -255,6 +300,137 @@ await test('KernelRegistry picks net kernel when network/preview ports required'
     security: { network_required: false },
   });
   assert.equal(offline.selected.id, 'gcc-ubuntu24-docker');
+});
+
+console.log('\n--- WorkspaceService ---');
+
+await test('Docker/default workspace strategy is runtime-internal fallback', () => {
+  const provider = new RuntimeProvider({ id: 'test', kind: 'docker' });
+  provider.workspaceDir = '/home/student/workspace';
+  const strategy = provider.workspaceStrategy({ workspace: '/home/student/workspace' });
+  assert.equal(strategy.kind, WORKSPACE_STRATEGY_KINDS.RUNTIME_INTERNAL);
+  assert.equal(strategy.fallback, true);
+  assert.equal(strategy.watch, 'find-polling');
+  assert.equal(strategy.capabilities.hostBindMount, false);
+  assert.equal(strategy.capabilities.nativeWatch, false);
+  const described = describeRuntimeInternalStrategy({ location: '/home/student/workspace' });
+  assert.equal(described.location, '/home/student/workspace');
+  assert.equal(described.hostPath, null);
+});
+
+await test('WorkspaceService path validation stays inside workspace root', () => {
+  const { session } = createMemoryWorkspaceSession();
+  const workspaceService = new WorkspaceService({ runtimeSession: session });
+  assert.equal(
+    workspaceService.validatePath('/home/student/workspace/hello.c'),
+    '/home/student/workspace/hello.c'
+  );
+  assert.equal(workspaceService.validatePath('hello.c'), '/home/student/workspace/hello.c');
+  assert.throws(() => workspaceService.validatePath('/etc/passwd'), /Access denied/);
+  assert.throws(() => workspaceService.validatePath('/home/student/workspace/../etc/passwd'), /Access denied/);
+});
+
+await test('WorkspaceService write/snapshot/list/read via memory session', async () => {
+  const { session, files } = createMemoryWorkspaceSession();
+  const workspaceService = new WorkspaceService({ runtimeSession: session });
+  await workspaceService.syncFromFiles([{ name: 'hello.c', content: 'int main(){}\n' }]);
+  assert.equal(files.get('hello.c'), 'int main(){}\n');
+  const snapshot = await workspaceService.snapshot();
+  assert.equal(snapshot[0].name, 'hello.c');
+  assert.equal(snapshot[0].language, 'c');
+  const listed = await workspaceService.listFiles();
+  assert.deepEqual(listed.files, [{ name: 'hello.c', type: 'file' }]);
+  const tree = await workspaceService.listTree({ depth: 2 });
+  assert.equal(tree.tree, true);
+  assert.equal(tree.entries[0].name, 'hello.c');
+  const read = await workspaceService.readFile('/home/student/workspace/hello.c');
+  assert.equal(read.content, 'int main(){}\n');
+});
+
+await test('WorkspaceService tree sort keeps dirs before files and parents first', () => {
+  const entries = parseFindTreeOutput(
+    'f\thello.c\nd\tsrc\nf\tsrc/main.c\nf\tnotes.txt\n',
+    '/home/student/workspace',
+    abs => abs
+  );
+  sortWorkspaceTreeEntries(entries);
+  assert.deepEqual(entries.map(entry => entry.relative), ['src', 'src/main.c', 'hello.c', 'notes.txt']);
+});
+
+await test('FindPollingWatcher fires when find signature changes', async () => {
+  let execCount = 0;
+  const session = {
+    workspaceDir: '/home/student/workspace',
+    async exec() {
+      execCount += 1;
+      const stdout = execCount === 1 ? 'f\ta.c\n' : 'f\ta.c\nf\tb.c\n';
+      return { stdout, stderr: '', exitCode: 0 };
+    },
+  };
+  let fired = 0;
+  const watcher = createFindPollingWatcher(session, () => { fired += 1; }, { intervalMs: 25 });
+  await new Promise(resolve => setTimeout(resolve, 90));
+  watcher.stop();
+  assert.ok(execCount >= 2, `expected at least 2 polls, got ${execCount}`);
+  assert.ok(fired >= 1, `expected onChange, got ${fired}`);
+});
+
+await test('SaveService.loadStepState template inherit syncs into workspace', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-smoke-'));
+  try {
+    const { saveService, files } = createSaveService(tmp);
+    const loaded = await saveService.loadStepState('hello-c', '01-first-program');
+    assert.equal(loaded.inheritMode, 'template');
+    assert.equal(loaded.hasOwnSave, true);
+    assert.ok(loaded.files.some(file => file.name === 'hello.c'));
+    assert.ok(files.has('hello.c'));
+    assert.equal(loaded.progress.current_step, '01-first-program');
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('SaveService.saveStepState snapshots workspace into save dir', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-smoke-'));
+  try {
+    const { saveService, packageService, session } = createSaveService(tmp);
+    await saveService.loadStepState('hello-c', '01-first-program');
+    await session.writeFiles([{ name: 'hello.c', content: 'changed\n' }], { clear: false });
+    await saveService.saveStepState('hello-c', '01-first-program');
+    const cfg = await packageService.loadTutorial('hello-c');
+    const saved = await fs.readFile(
+      path.join(saveService.saveDir(cfg, '01-first-program'), 'hello.c'),
+      'utf8'
+    );
+    assert.equal(saved, 'changed\n');
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('SaveService.applySaveBundle rejects unknown package digest', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-smoke-'));
+  try {
+    const { saveService } = createSaveService(tmp);
+    await assert.rejects(
+      () => saveService.applySaveBundle({
+        metadata: {
+          package: {
+            id: 'hello-c',
+            version: '1.0.0',
+            digest: `sha256:${'f'.repeat(64)}`,
+          },
+          current_step: '01-first-program',
+          visited: ['01-first-program'],
+          test_passed: {},
+        },
+        files: new Map(),
+      }),
+      (error) => error.code === 'package_missing' && error.statusCode === 404
+    );
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
 });
 
 console.log('\n--- frontend progress.js (pure helpers) ---');

@@ -6,6 +6,7 @@ import {
   normalizePublishPorts,
   portMapFromInspect,
 } from '../services/PreviewPortMap.js';
+import { describeRuntimeInternalStrategy } from '../workspace/WorkspaceStrategy.js';
 
 export class DockerRuntimeProvider extends RuntimeProvider {
   constructor({
@@ -47,6 +48,7 @@ export class DockerRuntimeProvider extends RuntimeProvider {
       networkMode,
       sandboxPreset,
       publishPorts,
+      workspaceStrategy: this.workspaceStrategy(kernel),
       fingerprint: [
         'docker',
         kernel.id,
@@ -57,6 +59,11 @@ export class DockerRuntimeProvider extends RuntimeProvider {
         publishPorts.join(','),
       ].join('|'),
     };
+  }
+
+  workspaceStrategy(kernel) {
+    const location = kernel?.workspace || this.workspaceDir || '/home/student/workspace';
+    return describeRuntimeInternalStrategy({ location });
   }
 
   async applyKernel(kernel) {
