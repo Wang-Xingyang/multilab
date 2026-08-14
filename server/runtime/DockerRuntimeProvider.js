@@ -1,18 +1,22 @@
 import Docker from 'dockerode';
 import { PassThrough } from 'stream';
+import crypto from 'crypto';
 import { RuntimeProvider, RuntimeSession } from './RuntimeProvider.js';
 import {
   allocatePortBindings,
   normalizePublishPorts,
   portMapFromInspect,
 } from '../services/PreviewPortMap.js';
-import { describeRuntimeInternalStrategy } from '../workspace/WorkspaceStrategy.js';
+import { chooseDockerWorkspaceStrategy } from '../workspace/WorkspaceStrategy.js';
+import { ensureHostWorkspaceDir } from '../workspace/HostWorkspace.js';
 
 export class DockerRuntimeProvider extends RuntimeProvider {
   constructor({
     image,
     containerName,
     workspaceDir = '/home/student/workspace',
+    hostWorkspaceDir = null,
+    workspaceStrategyMode = process.env.WORKSPACE_STRATEGY || 'auto',
     docker = new Docker(),
   }) {
     super({ id: 'docker', kind: 'docker' });
@@ -20,6 +24,8 @@ export class DockerRuntimeProvider extends RuntimeProvider {
     this.image = image;
     this.containerName = containerName;
     this.workspaceDir = workspaceDir;
+    this.hostWorkspaceDir = hostWorkspaceDir;
+    this.workspaceStrategyMode = workspaceStrategyMode;
     this.networkMode = 'none';
     this.sandboxPreset = 'standard';
     this.publishPorts = [];
@@ -41,6 +47,7 @@ export class DockerRuntimeProvider extends RuntimeProvider {
     const publishPorts = networkMode === 'none'
       ? []
       : normalizePublishPorts(kernel.publish_ports);
+    const workspaceStrategy = this.workspaceStrategy(kernel);
     return {
       kernel,
       image,
@@ -48,7 +55,7 @@ export class DockerRuntimeProvider extends RuntimeProvider {
       networkMode,
       sandboxPreset,
       publishPorts,
-      workspaceStrategy: this.workspaceStrategy(kernel),
+      workspaceStrategy,
       fingerprint: [
         'docker',
         kernel.id,
@@ -57,13 +64,19 @@ export class DockerRuntimeProvider extends RuntimeProvider {
         networkMode,
         sandboxPreset,
         publishPorts.join(','),
+        workspaceStrategy.kind,
+        workspaceStrategy.hostPath || '-',
       ].join('|'),
     };
   }
 
   workspaceStrategy(kernel) {
     const location = kernel?.workspace || this.workspaceDir || '/home/student/workspace';
-    return describeRuntimeInternalStrategy({ location });
+    return chooseDockerWorkspaceStrategy({
+      location,
+      hostPath: this.hostWorkspaceDir,
+      mode: this.workspaceStrategyMode,
+    });
   }
 
   async applyKernel(kernel) {
@@ -81,6 +94,7 @@ export class DockerRuntimeProvider extends RuntimeProvider {
     this.session.publishPorts = plan.publishPorts;
     this.session.kernelId = kernel.id;
     this.session.policyFingerprint = plan.fingerprint;
+    this.session.workspaceStrategy = plan.workspaceStrategy;
     return plan;
   }
 
@@ -108,6 +122,7 @@ export class DockerRuntimeSession extends RuntimeSession {
     this.workspaceReady = false;
     this.appliedFingerprint = null;
     this.portMap = {};
+    this.workspaceStrategy = provider.workspaceStrategy?.(null) || null;
   }
 
   getPortMap() {
@@ -134,8 +149,14 @@ export class DockerRuntimeSession extends RuntimeSession {
 
   async ensureWorkspace() {
     if (this.workspaceReady) return;
+    const hostPath = this.workspaceStrategy?.hostPath;
+    if (hostPath) {
+      await ensureHostWorkspaceDir(hostPath);
+    }
     await this.exec(['mkdir', '-p', this.workspaceDir], { user: 'root', cwd: '/' });
-    await this.exec(['chown', '-R', 'student:student', this.workspaceDir], { user: 'root', cwd: '/' });
+    if (!hostPath) {
+      await this.exec(['chown', '-R', 'student:student', this.workspaceDir], { user: 'root', cwd: '/' });
+    }
     this.workspaceReady = true;
   }
 
@@ -339,12 +360,18 @@ done
     }
 
     const publishPorts = normalizePublishPorts(this.publishPorts);
+    const workspaceStrategy = this.workspaceStrategy || { kind: 'runtime-internal', hostPath: null };
+    if (workspaceStrategy.hostPath) {
+      await ensureHostWorkspaceDir(workspaceStrategy.hostPath);
+    }
     const desired = desiredContainerLabels({
       kernelId: this.kernelId,
       image: this.image,
       networkMode: this.networkMode,
       sandboxPreset: this.sandboxPreset,
       publishPorts,
+      workspaceKind: workspaceStrategy.kind,
+      workspaceHost: workspaceStrategy.hostPath,
     });
 
     const containers = await this.docker.listContainers({ all: true });
@@ -368,7 +395,8 @@ done
 
       console.log(
         `[docker] 容器 ${this.containerName} 策略不匹配，按 kernel 重建 ` +
-        `(network=${this.networkMode}, sandbox=${this.sandboxPreset}, ports=${publishPorts.join(',') || '-'})`
+        `(network=${this.networkMode}, sandbox=${this.sandboxPreset}, ` +
+        `workspace=${workspaceStrategy.kind}, ports=${publishPorts.join(',') || '-'})`
       );
       try {
         if (existing.State === 'running') await container.stop({ t: 5 });
@@ -383,7 +411,8 @@ done
 
     console.log(
       `[docker] 创建并启动新容器 ${this.containerName} ` +
-      `(kernel=${this.kernelId || 'default'}, network=${this.networkMode}, sandbox=${this.sandboxPreset}, ports=${publishPorts.join(',') || '-'})`
+      `(kernel=${this.kernelId || 'default'}, network=${this.networkMode}, ` +
+      `sandbox=${this.sandboxPreset}, workspace=${workspaceStrategy.kind}, ports=${publishPorts.join(',') || '-'})`
     );
     const hostConfig = {
       AutoRemove: false,
@@ -391,6 +420,14 @@ done
     };
     if (this.sandboxPreset !== 'none') {
       hostConfig.SecurityOpt = ['no-new-privileges:true'];
+    }
+    if (workspaceStrategy.hostPath) {
+      hostConfig.Mounts = [{
+        Target: this.workspaceDir,
+        Source: workspaceStrategy.hostPath,
+        Type: 'bind',
+        ReadOnly: false,
+      }];
     }
 
     let exposedPorts;
@@ -471,13 +508,25 @@ function pickSandboxPreset(kernel) {
   return 'none';
 }
 
-function desiredContainerLabels({ kernelId, image, networkMode, sandboxPreset, publishPorts = [] }) {
+function desiredContainerLabels({
+  kernelId,
+  image,
+  networkMode,
+  sandboxPreset,
+  publishPorts = [],
+  workspaceKind = 'runtime-internal',
+  workspaceHost = null,
+}) {
   return {
     'multilab.kernel.id': String(kernelId || ''),
     'multilab.image': String(image || ''),
     'multilab.network': String(networkMode || ''),
     'multilab.sandbox': String(sandboxPreset || ''),
     'multilab.publish': normalizePublishPorts(publishPorts).join(',') || '-',
+    'multilab.workspace.kind': String(workspaceKind || 'runtime-internal'),
+    'multilab.workspace.host': workspaceHost
+      ? crypto.createHash('sha256').update(String(workspaceHost)).digest('hex').slice(0, 12)
+      : '-',
   };
 }
 

@@ -4,8 +4,19 @@ import {
   DEFAULT_WORKSPACE_LOCATION,
   describeRuntimeInternalStrategy,
   resolveWorkspaceStrategy,
+  usesHostFilesystem,
 } from '../workspace/WorkspaceStrategy.js';
 import { createFindPollingWatcher } from '../workspace/FindPollingWatcher.js';
+import { createHostFsWatcher } from '../workspace/HostFsWatcher.js';
+import {
+  listHostWorkspaceFiles,
+  listHostWorkspaceTree,
+  readHostWorkspaceFile,
+  readHostWorkspaceFiles,
+  writeHostWorkspaceFile,
+  writeHostWorkspaceFiles,
+} from '../workspace/HostWorkspace.js';
+import { parseFindTreeOutput, sortWorkspaceTreeEntries } from '../workspace/WorkspaceTree.js';
 
 /**
  * Owns the live learner workspace: init, file IO, snapshot, tree listing,
@@ -13,9 +24,9 @@ import { createFindPollingWatcher } from '../workspace/FindPollingWatcher.js';
  * command execution.
  *
  * Physical placement is described by a WorkspaceStrategy chosen by the
- * runtime provider. The current Docker provider uses runtime-internal
- * IO through RuntimeSession (copy in/out via exec). Bind-mount / volume
- * / host-local strategies can replace that later without changing callers.
+ * runtime provider. Docker on Linux/WSL ext4 bind-mounts a host directory
+ * and this service reads/writes that path directly. Other platforms keep
+ * the runtime-internal copy/sync fallback through RuntimeSession.
  */
 export class WorkspaceService {
   constructor({
@@ -66,6 +77,11 @@ export class WorkspaceService {
   }
 
   async writeFiles(files, opts = {}) {
+    const strategy = this.describe();
+    if (usesHostFilesystem(strategy)) {
+      await writeHostWorkspaceFiles(strategy, files, opts);
+      return;
+    }
     const session = await this.resolveSession(opts.tutorialId);
     const normalized = (files || []).map(file => {
       const name = validateFileName(file.name || 'untitled');
@@ -75,12 +91,22 @@ export class WorkspaceService {
   }
 
   async snapshot({ tutorialId = null } = {}) {
+    const strategy = this.describe();
+    if (usesHostFilesystem(strategy)) {
+      const files = await readHostWorkspaceFiles(strategy);
+      return files.map(file => annotateWorkspaceFile(file));
+    }
     const session = await this.resolveSession(tutorialId);
     const files = await session.readFiles();
     return files.map(file => annotateWorkspaceFile(file));
   }
 
   async listFiles({ dir } = {}) {
+    const strategy = this.describe();
+    if (usesHostFilesystem(strategy)) {
+      this.validatePath(dir || this.workspaceRoot());
+      return listHostWorkspaceFiles(strategy, dir);
+    }
     const session = await this.resolveSession();
     const target = this.validatePath(dir || this.workspaceRoot());
     const result = await session.exec(
@@ -98,6 +124,11 @@ export class WorkspaceService {
   }
 
   async listTree({ dir, depth } = {}) {
+    const strategy = this.describe();
+    if (usesHostFilesystem(strategy)) {
+      this.validatePath(dir || this.workspaceRoot());
+      return listHostWorkspaceTree(strategy, { dir, depth });
+    }
     const session = await this.resolveSession();
     const target = this.validatePath(dir || this.workspaceRoot());
     const maxDepth = Math.min(6, Math.max(1, Number(depth) || 4));
@@ -118,8 +149,12 @@ export class WorkspaceService {
   }
 
   async readFile(filePath) {
-    const session = await this.resolveSession();
+    const strategy = this.describe();
     const target = this.validatePath(filePath);
+    if (usesHostFilesystem(strategy)) {
+      return readHostWorkspaceFile(strategy, target);
+    }
+    const session = await this.resolveSession();
     const result = await session.exec(['cat', target]);
     if (result.exitCode !== 0) {
       throw Object.assign(new Error(result.stderr || 'read failed'), { statusCode: 500 });
@@ -128,8 +163,12 @@ export class WorkspaceService {
   }
 
   async writeFile(filePath, content) {
-    const session = await this.resolveSession();
+    const strategy = this.describe();
     const target = this.validatePath(filePath);
+    if (usesHostFilesystem(strategy)) {
+      return writeHostWorkspaceFile(strategy, target, content);
+    }
+    const session = await this.resolveSession();
     await session.uploadScript(content, target);
     return { path: target, saved: true };
   }
@@ -143,6 +182,14 @@ export class WorkspaceService {
   }
 
   watch(onChange, opts = {}) {
+    const strategy = this.describe();
+    if (usesHostFilesystem(strategy) && strategy.capabilities.nativeWatch) {
+      try {
+        return createHostFsWatcher(strategy, onChange, opts);
+      } catch (error) {
+        console.warn(`[workspace] host watch unavailable, using find-polling: ${error.message}`);
+      }
+    }
     const session = this.getSession();
     if (typeof session.watchFilesystem === 'function') {
       return session.watchFilesystem(onChange, opts);
@@ -204,43 +251,5 @@ export function annotateWorkspaceFile(file) {
   };
 }
 
-export function parseFindTreeOutput(stdout, dir, validatePath) {
-  const entries = [];
-  for (const line of String(stdout || '').trim().split('\n').filter(Boolean)) {
-    const tab = line.indexOf('\t');
-    if (tab < 0) continue;
-    const kind = line.slice(0, tab);
-    const rel = line.slice(tab + 1);
-    if (!rel || rel.includes('\0') || rel.split('/').some(part => part === '..')) continue;
-    const abs = path.posix.join(dir, rel);
-    validatePath(abs);
-    entries.push({
-      name: path.posix.basename(rel),
-      path: abs,
-      relative: rel,
-      type: kind === 'd' ? 'dir' : 'file',
-    });
-  }
-  return entries;
-}
-
-export function sortWorkspaceTreeEntries(entries) {
-  const dirRels = new Set(entries.filter(entry => entry.type === 'dir').map(entry => entry.relative));
-  entries.sort((a, b) => {
-    const pa = a.relative.split('/');
-    const pb = b.relative.split('/');
-    const len = Math.min(pa.length, pb.length);
-    for (let i = 0; i < len; i++) {
-      if (pa[i] !== pb[i]) {
-        const aIsDir = dirRels.has(pa.slice(0, i + 1).join('/'));
-        const bIsDir = dirRels.has(pb.slice(0, i + 1).join('/'));
-        if (aIsDir !== bIsDir) return aIsDir ? -1 : 1;
-        return pa[i].localeCompare(pb[i]);
-      }
-    }
-    return pa.length - pb.length;
-  });
-  return entries;
-}
-
+export { parseFindTreeOutput, sortWorkspaceTreeEntries } from '../workspace/WorkspaceTree.js';
 export { describeRuntimeInternalStrategy, DEFAULT_WORKSPACE_LOCATION };

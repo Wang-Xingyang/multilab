@@ -17,7 +17,7 @@ This repository is an early prototype of the MultiLab host:
 - security: digest-keyed trust store (default `untrusted`) and command-time security policy gates;
 - kernels/runtime: static `KernelRegistry` with offline `gcc-ubuntu24-docker` and networked `gcc-ubuntu24-docker-net` (localhost port publish); `RuntimeManager` binds the selected kernel to a provider and applies Docker network/sandbox/port settings; UI can pick a compatible kernel and reconnect the terminal;
 - saves: versioned step files plus `save.json` progress metadata under `.multilab-state/saves/`;
-- workspace: `WorkspaceService` owns the live scratch copy; current Docker kernels still use a runtime-internal workspace (copy in/out), not bind-mount;
+- workspace: `WorkspaceService` owns the live scratch copy; Docker bind-mounts it on Linux/WSL ext4 and falls back to runtime-internal copy/sync elsewhere;
 - panels: manifest `default_panels` drive tutorial/terminal/file-tree visibility plus test-results/web-preview/logs/diagnostics aux panels; progress strip uses `save.json`; trust changes go through a confirmation dialog;
 - checks: `npm run test:smoke` runs a Docker-free service smoke suite.
 
@@ -89,7 +89,7 @@ npm install
 cp .env.example .env
 ```
 
-The default `.env` points `TUTORIALS_DIR` at `../../tutorials` and stores runtime state under `../.multilab-state`.
+The default `.env` points `TUTORIALS_DIR` at `../../tutorials` and stores runtime state under `../.multilab-state`. `WORKSPACE_STRATEGY=auto` bind-mounts the live workspace on Linux/WSL ext4.
 
 Start the server:
 

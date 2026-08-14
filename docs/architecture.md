@@ -56,7 +56,13 @@ Docker runtime
 
 Docker is currently the only implemented provider. `RuntimeManager` selects a provider from the resolved kernel's `provider` field, then asks that provider to apply kernel image/network/sandbox settings before starting a session.
 
-The live workspace is logically owned by MultiLab through `WorkspaceService`. The physical location and IO strategy are chosen by the runtime provider (`RuntimeProvider.workspaceStrategy`). Current Docker kernels use `runtime-internal`: files live inside the container and are copied in/out through `RuntimeSession`. That is a fallback, not the target. Later strategies may use Linux bind mounts, Docker Desktop volume/sync, WSL ext4, or a trusted-only host-local workspace. Runtime kernels provide execution capability; they should not require a MultiLab-specific in-kernel agent.
+The live workspace is logically owned by MultiLab through `WorkspaceService`. The physical location and IO strategy are chosen by the runtime provider (`RuntimeProvider.workspaceStrategy`).
+
+On Linux/WSL with a fast local filesystem (ext4/xfs/btrfs/tmpfs), Docker bind-mounts `.multilab-state/workspaces/live` to `/home/student/workspace`. `WorkspaceService` then reads, writes, lists, and watches the host directory directly. File-tree updates use host `fs.watch` with a short debounce (content-only edits still do not fire).
+
+Docker Desktop Windows/macOS, Windows-drive mounts (`/mnt/c`), and unknown/slow filesystems keep `runtime-internal` copy/sync through `RuntimeSession.exec`. Override with `WORKSPACE_STRATEGY=bind-mount` or `WORKSPACE_STRATEGY=runtime-internal`. Volume-sync for Docker Desktop is not implemented. Runtime kernels provide execution capability; they should not require a MultiLab-specific in-kernel agent.
+
+The bind-mounted scratch directory is mode `0777` / files `0666` because the host uid and the container `student` uid may differ (Ubuntu 24.04 images often already have uid 1000). This is acceptable for a local single-user scratch workspace.
 
 ## Tutorial Loading
 
@@ -210,7 +216,7 @@ Current UI behavior:
 - captured preview output may include `MULTILAB_PREVIEW_HTML` or HTML body for sandboxed `iframe.srcdoc` rendering;
 - `MULTILAB_PREVIEW_URL=...` is rewritten to a host-local mapped URL when the active Docker kernel publishes that container port (`publish_ports`, bound to `127.0.0.1`); otherwise it remains text with guidance to use `gcc-ubuntu24-docker-net` and `security.network_required` / `security.preview_ports`.
 - Packages that need network or preview ports resolve to `gcc-ubuntu24-docker-net` (bridge + sandbox + published ports). Offline packages still require `network_default: none`.
-- `file-tree` panels render a center-left tree from `GET /api/fs/ls?tree=1` (workspace-scoped). The tree auto-refreshes in real time: `WorkspaceService.watch` uses the current strategy's watcher and pushes `type: "fs_change"` over `/ws`; the frontend re-fetches `GET /api/fs/ls` on receipt. Docker currently uses the find-polling fallback (~1s via `RuntimeSession.exec`). Providers may later replace that with native watch. No MultiLab-specific kernel agent is required — `find` ships with coreutils.
+- `file-tree` panels render a center-left tree from `GET /api/fs/ls?tree=1` (workspace-scoped). The tree auto-refreshes in real time: `WorkspaceService.watch` uses the current strategy's watcher and pushes `type: "fs_change"` over `/ws`; the frontend re-fetches `GET /api/fs/ls` on receipt. Bind-mount workspaces watch the host directory; `runtime-internal` keeps the find-polling fallback (~1s via `RuntimeSession.exec`). No MultiLab-specific kernel agent is required.
 
 ## Terminal Model
 
@@ -256,7 +262,7 @@ Current implementation intentionally does not overwrite learner files during `ov
 
 Step load/save/reset is handled by `server/services/SaveService.js`. It owns save identity paths, host save file IO, first-entry inheritance, reset behavior, and progress metadata. It asks `WorkspaceService` to sync template/save files into the live workspace and to snapshot the live workspace back into the save directory.
 
-`WorkspaceService` owns workspace initialization, scoped file IO (`/api/fs/*`), snapshot, export, and watch. File APIs and the WebSocket `fs_change` watcher go through this service rather than talking to Docker directly. The current Docker provider still copies files through `RuntimeSession.writeFiles` / `readFiles`; bind-mount is not enabled yet.
+`WorkspaceService` owns workspace initialization, scoped file IO (`/api/fs/*`), snapshot, export, and watch. File APIs and the WebSocket `fs_change` watcher go through this service rather than talking to Docker directly. On Linux/WSL ext4, Docker bind-mounts a host workspace and `WorkspaceService` uses host IO; elsewhere it still copies through `RuntimeSession.writeFiles` / `readFiles`.
 
 ## Save Storage
 
@@ -383,8 +389,8 @@ The UI shows a kernel selector for compatible candidates and a "重连终端" bu
 ## Known Limitations
 
 - Docker is still the only implemented provider.
-- Current Docker workspace strategy is `runtime-internal` (copy in/out via exec). Bind-mount / volume-sync / host-local strategies are not implemented.
-- File-tree watch uses find-polling as a WorkspaceService fallback, not a native watcher.
+- Docker workspace strategy is `bind-mount` on Linux/WSL ext4 and `runtime-internal` elsewhere. Volume-sync / host-local strategies are not implemented.
+- File-tree watch uses host `fs.watch` for bind-mount and find-polling as the fallback.
 - `.mlab` pack/unpack CLI, host-path import, and browser upload/open are implemented.
 - `.mlab-save` host-path export/import and browser upload/download are implemented.
 - Kernel registry is static and only contains the default Docker kernel.

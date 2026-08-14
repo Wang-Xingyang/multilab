@@ -26,7 +26,10 @@ import { createFindPollingWatcher } from '../server/workspace/FindPollingWatcher
 import {
   WORKSPACE_STRATEGY_KINDS,
   describeRuntimeInternalStrategy,
+  describeBindMountStrategy,
+  chooseDockerWorkspaceStrategy,
 } from '../server/workspace/WorkspaceStrategy.js';
+import { createHostFsWatcher } from '../server/workspace/HostFsWatcher.js';
 import { RuntimeProvider } from '../server/runtime/RuntimeProvider.js';
 import { MlabSaveArchiveService } from '../server/services/MlabSaveArchiveService.js';
 import { KernelSelectionStore } from '../server/services/KernelSelectionStore.js';
@@ -316,6 +319,114 @@ await test('Docker/default workspace strategy is runtime-internal fallback', () 
   const described = describeRuntimeInternalStrategy({ location: '/home/student/workspace' });
   assert.equal(described.location, '/home/student/workspace');
   assert.equal(described.hostPath, null);
+});
+
+await test('chooseDockerWorkspaceStrategy bind-mounts linux ext4 and refuses slow mounts', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-ws-'));
+  try {
+    const forcedInternal = chooseDockerWorkspaceStrategy({
+      location: '/home/student/workspace',
+      hostPath: tmp,
+      mode: 'runtime-internal',
+      platform: 'linux',
+    });
+    assert.equal(forcedInternal.kind, WORKSPACE_STRATEGY_KINDS.RUNTIME_INTERNAL);
+    assert.equal(forcedInternal.reason, 'forced');
+
+    const windowsDrive = chooseDockerWorkspaceStrategy({
+      location: '/home/student/workspace',
+      hostPath: '/mnt/c/Users/someone/.multilab-state/workspaces/live',
+      mode: 'auto',
+      platform: 'linux',
+    });
+    assert.equal(windowsDrive.kind, WORKSPACE_STRATEGY_KINDS.RUNTIME_INTERNAL);
+    assert.equal(windowsDrive.reason, 'windows-drive');
+
+    const darwin = chooseDockerWorkspaceStrategy({
+      location: '/home/student/workspace',
+      hostPath: tmp,
+      mode: 'auto',
+      platform: 'darwin',
+    });
+    assert.equal(darwin.kind, WORKSPACE_STRATEGY_KINDS.RUNTIME_INTERNAL);
+
+    const auto = chooseDockerWorkspaceStrategy({
+      location: '/home/student/workspace',
+      hostPath: tmp,
+      mode: 'auto',
+      platform: 'linux',
+    });
+    if (process.platform === 'linux') {
+      assert.equal(auto.kind, WORKSPACE_STRATEGY_KINDS.BIND_MOUNT);
+      assert.equal(auto.hostPath, tmp);
+      assert.equal(auto.capabilities.hostReadable, true);
+      assert.equal(auto.watch, 'host-fs');
+    } else {
+      assert.equal(auto.kind, WORKSPACE_STRATEGY_KINDS.RUNTIME_INTERNAL);
+    }
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('WorkspaceService bind-mount writes on host without session.exec', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-bind-'));
+  try {
+    const hostPath = path.join(tmp, 'live');
+    const session = {
+      workspaceDir: '/home/student/workspace',
+      workspaceStrategy: describeBindMountStrategy({
+        location: '/home/student/workspace',
+        hostPath,
+      }),
+      async ensureWorkspace() {},
+      async exec() { throw new Error('session.exec should not run for bind-mount IO'); },
+      async writeFiles() { throw new Error('session.writeFiles should not run for bind-mount IO'); },
+      async readFiles() { throw new Error('session.readFiles should not run for bind-mount IO'); },
+    };
+    const workspaceService = new WorkspaceService({ runtimeSession: session });
+    await workspaceService.syncFromFiles([{ name: 'hello.c', content: 'int main(){}\n' }]);
+    const onDisk = await fs.readFile(path.join(hostPath, 'hello.c'), 'utf8');
+    assert.equal(onDisk, 'int main(){}\n');
+    const snapshot = await workspaceService.snapshot();
+    assert.equal(snapshot[0].name, 'hello.c');
+    const listed = await workspaceService.listFiles();
+    assert.deepEqual(listed.files, [{ name: 'hello.c', type: 'file' }]);
+    const read = await workspaceService.readFile('/home/student/workspace/hello.c');
+    assert.equal(read.content, 'int main(){}\n');
+    await workspaceService.writeFile('/home/student/workspace/notes.txt', 'hi\n');
+    const tree = await workspaceService.listTree({ depth: 2 });
+    assert.ok(tree.entries.some(entry => entry.name === 'notes.txt'));
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('HostFsWatcher fires on add, not on content-only edits', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-watch-'));
+  try {
+    const hostPath = path.join(tmp, 'live');
+    await fs.mkdir(hostPath, { recursive: true });
+    await fs.writeFile(path.join(hostPath, 'a.c'), 'a\n');
+    const strategy = describeBindMountStrategy({
+      location: '/home/student/workspace',
+      hostPath,
+    });
+    let fired = 0;
+    const watcher = createHostFsWatcher(strategy, () => { fired += 1; }, { debounceMs: 40 });
+    await new Promise(resolve => setTimeout(resolve, 60));
+    const beforeAdd = fired;
+    await fs.writeFile(path.join(hostPath, 'b.c'), 'b\n');
+    await new Promise(resolve => setTimeout(resolve, 120));
+    assert.ok(fired > beforeAdd, `expected add to fire, before=${beforeAdd} after=${fired}`);
+    const afterAdd = fired;
+    await fs.writeFile(path.join(hostPath, 'a.c'), 'changed\n');
+    await new Promise(resolve => setTimeout(resolve, 120));
+    assert.equal(fired, afterAdd, 'content-only edit must not fire');
+    watcher.stop();
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
 });
 
 await test('WorkspaceService path validation stays inside workspace root', () => {

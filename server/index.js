@@ -46,11 +46,15 @@ const RUNTIME_STATE_DIR = process.env.RUNTIME_STATE_DIR
 const PACKAGE_LIBRARY_DIR = process.env.PACKAGE_LIBRARY_DIR
   ? path.resolve(__dirname, process.env.PACKAGE_LIBRARY_DIR)
   : path.join(RUNTIME_STATE_DIR, 'packages');
+const HOST_WORKSPACE_DIR = process.env.HOST_WORKSPACE_DIR
+  ? path.resolve(__dirname, process.env.HOST_WORKSPACE_DIR)
+  : path.join(RUNTIME_STATE_DIR, 'workspaces', 'live');
 
 const dockerRuntimeProvider = new DockerRuntimeProvider({
   image: EXEC_IMAGE,
   containerName: CONTAINER_NAME,
   workspaceDir: WORKSPACE_DIR,
+  hostWorkspaceDir: HOST_WORKSPACE_DIR,
 });
 const archiveService = new MlabArchiveService();
 const packageLibrary = new PackageLibrary({
@@ -656,6 +660,8 @@ runtimeManager.ensureDefaultSession()
       console.log(`  Kernel: ${kernel.id} (${kernel.provider})`);
       console.log(`  Container: ${CONTAINER_NAME} (${kernel.image || EXEC_IMAGE})`);
       console.log(`  Network: ${ensured.plan?.networkMode || 'n/a'}  Sandbox: ${ensured.plan?.sandboxPreset || 'n/a'}`);
+      const workspace = ensured.plan?.workspaceStrategy || workspaceService.describe();
+      console.log(`  Workspace: ${workspace.kind}${workspace.hostPath ? ` → ${workspace.hostPath}` : ''}`);
       console.log(`  Stop with Ctrl+C — container 会保留,策略变化时按 kernel 重建\n`);
     });
   })
