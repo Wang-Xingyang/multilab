@@ -39,7 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# 非 root 用户,匹配 OS 课评分环境
+# 非 root 用户,匹配 OS 课评分环境。运行时会把 student uid 对齐到主机用户。
 RUN useradd -m -s /bin/bash student
 USER student
 WORKDIR /home/student/workspace

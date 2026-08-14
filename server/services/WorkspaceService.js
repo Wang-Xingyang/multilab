@@ -1,5 +1,5 @@
 import path from 'path';
-import { LANG_BY_EXT, validateFileName } from './PackageService.js';
+import { LANG_BY_EXT, validateFileName, validateWorkspaceRelPath } from './PackageService.js';
 import {
   DEFAULT_WORKSPACE_LOCATION,
   describeRuntimeInternalStrategy,
@@ -15,6 +15,10 @@ import {
   readHostWorkspaceFiles,
   writeHostWorkspaceFile,
   writeHostWorkspaceFiles,
+  clearHostDirContents,
+  isHostPermissionError,
+  wipeBindMountViaExec,
+  relaxBindMountViaExec,
 } from '../workspace/HostWorkspace.js';
 import { parseFindTreeOutput, sortWorkspaceTreeEntries } from '../workspace/WorkspaceTree.js';
 
@@ -29,6 +33,8 @@ import { parseFindTreeOutput, sortWorkspaceTreeEntries } from '../workspace/Work
  * the runtime-internal copy/sync fallback through RuntimeSession.
  */
 export class WorkspaceService {
+  #watchers = [];
+
   constructor({
     runtimeManager = null,
     runtimeSession = null,
@@ -37,15 +43,24 @@ export class WorkspaceService {
     this.runtimeManager = runtimeManager;
     this.runtimeSession = runtimeSession;
     this.workspaceDir = workspaceDir;
+    this.attachedHostPath = null;
   }
 
   describe() {
-    return resolveWorkspaceStrategy({
+    const base = resolveWorkspaceStrategy({
       provider: this.#providerForActiveKernel(),
       kernel: this.runtimeManager?.getActiveKernel?.() || null,
       session: this.#tryGetSession(),
       workspaceDir: this.workspaceDir,
     });
+    if (this.attachedHostPath && usesHostFilesystem(base)) {
+      return {
+        ...base,
+        hostPath: this.attachedHostPath,
+        bindHostPath: base.hostPath,
+      };
+    }
+    return base;
   }
 
   workspaceRoot() {
@@ -71,6 +86,36 @@ export class WorkspaceService {
     return session;
   }
 
+  /**
+   * Make this step's save directory the live workspace.
+   * Bind-mount/host-local: host IO uses that directory; Docker points
+   * /home/student/workspace at the bind-mounted save path.
+   * runtime-internal: copy files into the session workspace.
+   */
+  async useSaveWorkspace({
+    hostPath,
+    containerPath = null,
+    files = null,
+    tutorialId = null,
+  } = {}) {
+    this.attachedHostPath = hostPath ? path.resolve(hostPath) : null;
+    await this.ensure({ tutorialId });
+    const strategy = this.describe();
+    if (usesHostFilesystem(strategy) && containerPath) {
+      const session = await this.resolveSession(tutorialId);
+      if (typeof session.pointWorkspace === 'function') {
+        await session.pointWorkspace(containerPath);
+      }
+      this.#restartWatchers();
+      return;
+    }
+    await this.writeFiles(files || [], { clear: true, tutorialId });
+  }
+
+  usesHostBackedSave() {
+    return usesHostFilesystem(this.describe());
+  }
+
   async syncFromFiles(files, { tutorialId = null, clear = true } = {}) {
     await this.ensure({ tutorialId });
     await this.writeFiles(files, { clear });
@@ -79,13 +124,23 @@ export class WorkspaceService {
   async writeFiles(files, opts = {}) {
     const strategy = this.describe();
     if (usesHostFilesystem(strategy)) {
-      await writeHostWorkspaceFiles(strategy, files, opts);
+      if (opts.clear !== false) {
+        await this.#clearBindMountWorkspace(strategy, opts.tutorialId);
+      }
+      try {
+        await writeHostWorkspaceFiles(strategy, files, { clear: false });
+      } catch (error) {
+        if (!isHostPermissionError(error)) throw error;
+        await this.#relaxBindMountWorkspace(strategy, opts.tutorialId);
+        await writeHostWorkspaceFiles(strategy, files, { clear: false });
+      }
       return;
     }
     const session = await this.resolveSession(opts.tutorialId);
     const normalized = (files || []).map(file => {
-      const name = validateFileName(file.name || 'untitled');
-      return { name, content: file.content || '' };
+      const name = validateWorkspaceRelPath(file.name || 'untitled');
+      if (file.type === 'dir') return { name, type: 'dir' };
+      return { name, type: 'file', content: file.content || '' };
     });
     await session.writeFiles(normalized, opts);
   }
@@ -134,7 +189,7 @@ export class WorkspaceService {
     const maxDepth = Math.min(6, Math.max(1, Number(depth) || 4));
     const result = await session.exec(
       [
-        'find', target, '-maxdepth', String(maxDepth), '-mindepth', '1',
+        'find', '-H', target, '-maxdepth', String(maxDepth), '-mindepth', '1',
         '(', '-type', 'f', '-o', '-type', 'd', ')',
         '-printf', '%y\t%P\n',
       ],
@@ -166,7 +221,13 @@ export class WorkspaceService {
     const strategy = this.describe();
     const target = this.validatePath(filePath);
     if (usesHostFilesystem(strategy)) {
-      return writeHostWorkspaceFile(strategy, target, content);
+      try {
+        return await writeHostWorkspaceFile(strategy, target, content);
+      } catch (error) {
+        if (!isHostPermissionError(error)) throw error;
+        await this.#relaxBindMountWorkspace(strategy);
+        return writeHostWorkspaceFile(strategy, target, content);
+      }
     }
     const session = await this.resolveSession();
     await session.uploadScript(content, target);
@@ -182,22 +243,64 @@ export class WorkspaceService {
   }
 
   watch(onChange, opts = {}) {
+    const started = this.#startWatch(onChange, opts);
+    const entry = { onChange, opts, handle: started };
+    this.#watchers.push(entry);
+    return {
+      stop: () => {
+        entry.handle?.stop?.();
+        this.#watchers = this.#watchers.filter(item => item !== entry);
+      },
+    };
+  }
+
+  #startWatch(onChange, opts = {}) {
     const strategy = this.describe();
+    const handles = [];
     if (usesHostFilesystem(strategy) && strategy.capabilities.nativeWatch) {
       try {
-        return createHostFsWatcher(strategy, onChange, opts);
+        handles.push(createHostFsWatcher(strategy, onChange, opts));
       } catch (error) {
         console.warn(`[workspace] host watch unavailable, using find-polling: ${error.message}`);
       }
     }
-    const session = this.getSession();
-    if (typeof session.watchFilesystem === 'function') {
-      return session.watchFilesystem(onChange, opts);
+    try {
+      const session = this.getSession();
+      if (typeof session.exec === 'function') {
+        handles.push(createFindPollingWatcher(session, onChange, {
+          ...opts,
+          intervalMs: handles.length ? (opts.intervalMs || 1200) : (opts.intervalMs || 1000),
+          workspaceDir: this.workspaceDir,
+        }));
+      } else if (!handles.length && typeof session.watchFilesystem === 'function') {
+        handles.push(session.watchFilesystem(onChange, opts));
+      }
+    } catch (error) {
+      if (!handles.length) {
+        console.warn(`[workspace] find-polling unavailable: ${error.message}`);
+      }
     }
-    return createFindPollingWatcher(session, onChange, {
-      ...opts,
-      workspaceDir: this.workspaceRoot(),
-    });
+    if (!handles.length) {
+      return { stop() {} };
+    }
+    return {
+      stop() {
+        for (const handle of handles) {
+          try { handle.stop?.(); } catch { /* already stopped */ }
+        }
+      },
+    };
+  }
+
+  #restartWatchers() {
+    for (const entry of this.#watchers) {
+      try {
+        entry.handle?.stop?.();
+      } catch {
+        // previous watcher may already be stopped
+      }
+      entry.handle = this.#startWatch(entry.onChange, entry.opts);
+    }
   }
 
   async resolveSession(tutorialId = null) {
@@ -222,6 +325,26 @@ export class WorkspaceService {
     return this.runtimeSession;
   }
 
+  async #clearBindMountWorkspace(strategy, tutorialId = null) {
+    try {
+      await clearHostDirContents(strategy.hostPath);
+      return;
+    } catch (error) {
+      if (!isHostPermissionError(error)) throw error;
+    }
+    const session = await this.resolveSession(tutorialId);
+    await wipeBindMountViaExec(session.exec?.bind(session), strategy.location);
+    await clearHostDirContents(strategy.hostPath);
+  }
+
+  async #relaxBindMountWorkspace(strategy, tutorialId = null) {
+    const session = await this.resolveSession(tutorialId);
+    const relaxed = await relaxBindMountViaExec(session.exec?.bind(session), strategy.location);
+    if (!relaxed) {
+      throw Object.assign(new Error('workspace files are not writable from the host'), { statusCode: 500 });
+    }
+  }
+
   #tryGetSession() {
     try {
       return this.getSession();
@@ -242,10 +365,12 @@ export class WorkspaceService {
 }
 
 export function annotateWorkspaceFile(file) {
-  const name = validateFileName(file.name);
+  const name = validateWorkspaceRelPath(file.name);
+  if (file.type === 'dir') return { name, type: 'dir' };
   const ext = path.extname(name).toLowerCase();
   return {
     name,
+    type: 'file',
     content: file.content,
     language: LANG_BY_EXT[ext] || 'plaintext',
   };

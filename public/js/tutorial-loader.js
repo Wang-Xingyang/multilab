@@ -90,7 +90,7 @@ export async function loadTutorialList(opts = {}) {
 
 export async function loadTutorial(id) {
   try {
-    if (state.currentTutorial) await saveCurrentStep({ silent: true });
+    if (state.currentTutorial) await saveCurrentStep({ silent: true, force: true });
     state.currentTutorial = await apiGet(`/api/tutorials/${encodeURIComponent(id)}`);
     if (!state.currentTutorial || !state.currentTutorial.steps?.length) throw new Error(t('tutorial.invalidData'));
     state.currentProgress = normalizeProgress(state.currentTutorial.progress || null);
@@ -122,7 +122,7 @@ export async function enterStep(targetIndex, opts = {}) {
   try {
     document.getElementById('prev-step').disabled = true;
     document.getElementById('next-step').disabled = true;
-    if (!opts.skipSave) await saveCurrentStep({ silent: true });
+    if (!opts.skipSave) await saveCurrentStep({ silent: true, force: true });
     state.currentStep = targetIndex;
     renderTutorialStepText();
     applyProgressToUi();
@@ -131,7 +131,10 @@ export async function enterStep(targetIndex, opts = {}) {
     const result = await apiJson('/api/steps/load', { tutorial: currentTutorialKey(), step: step.id });
     if (seq !== state.stepLoadSeq) return;
     applyProgress(result.progress);
-    loadFilesIntoEditor(result.files || []);
+    loadFilesIntoEditor(result.files || [], {
+      ui: result.ui,
+      entryFile: step.entry_file,
+    });
     renderTutorialStepText();
     applyProgressToUi();
     appendSessionLog(t('tutorial.enterLog', { id: step.id }));

@@ -16,7 +16,7 @@ export async function exportSaveDownload() {
   if (!state.currentTutorial) return;
   const tutorialKey = currentTutorialKey();
   try {
-    await saveCurrentStep({ silent: true });
+    await saveCurrentStep({ silent: true, force: true });
     status(t('save.exporting'));
     const { blob, filename } = await apiPostBlob('/api/saves/download', { tutorial: tutorialKey });
     const finalName = filename || `${state.currentTutorial.package_id || 'tutorial'}.mlab-save`;

@@ -82,11 +82,11 @@ try {
   if (!hasImage) {
     console.log('\nDocker image multilab/os:latest missing; skipped container comparison.');
   } else {
-    const bindDir = path.join(tmp, 'docker-live');
+    const bindDir = path.join(tmp, 'docker-saves');
     const provider = new DockerRuntimeProvider({
       image: 'multilab/os:latest',
       containerName: 'multilab-ws-latency',
-      hostWorkspaceDir: bindDir,
+      hostSavesDir: bindDir,
       workspaceStrategyMode: 'bind-mount',
       docker,
     });
@@ -102,6 +102,7 @@ try {
     await provider.applyKernel(kernel);
     const session = await provider.startSession();
     await session.ensureWorkspace();
+    await session.pointWorkspace('/home/student/.mlab-saves');
 
     t0 = performance.now();
     await writeHostWorkspaceFiles(session.workspaceStrategy, files);

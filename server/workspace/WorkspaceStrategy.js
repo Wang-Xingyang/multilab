@@ -22,6 +22,7 @@ export const WORKSPACE_STRATEGY_KINDS = Object.freeze({
 });
 
 export const DEFAULT_WORKSPACE_LOCATION = '/home/student/workspace';
+export const SAVES_BIND_TARGET = '/home/student/.mlab-saves';
 
 const FAST_LOCAL_FS = new Set([
   'ext4', 'ext3', 'ext2', 'xfs', 'btrfs', 'tmpfs', 'zfs', 'overlay',
@@ -50,6 +51,7 @@ export function describeRuntimeInternalStrategy({
 export function describeBindMountStrategy({
   location = DEFAULT_WORKSPACE_LOCATION,
   hostPath,
+  bindTarget = null,
   fsType = null,
   watch = 'host-fs',
 } = {}) {
@@ -60,6 +62,7 @@ export function describeBindMountStrategy({
     kind: WORKSPACE_STRATEGY_KINDS.BIND_MOUNT,
     location,
     hostPath,
+    bindTarget: bindTarget || location,
     fallback: false,
     watch,
     fsType,
@@ -68,6 +71,31 @@ export function describeBindMountStrategy({
       fileOpsViaSession: false,
       nativeWatch: watch === 'host-fs',
       hostBindMount: true,
+      hostReadable: true,
+    },
+  };
+}
+
+export function describeHostLocalStrategy({
+  location = DEFAULT_WORKSPACE_LOCATION,
+  hostPath,
+  reason = 'host-local',
+} = {}) {
+  if (!hostPath) {
+    throw new Error('describeHostLocalStrategy requires hostPath');
+  }
+  return {
+    kind: WORKSPACE_STRATEGY_KINDS.HOST_LOCAL,
+    location,
+    hostPath,
+    bindTarget: null,
+    fallback: false,
+    watch: 'host-fs',
+    reason,
+    capabilities: {
+      fileOpsViaSession: false,
+      nativeWatch: true,
+      hostBindMount: false,
       hostReadable: true,
     },
   };
@@ -105,6 +133,7 @@ export function isFastLocalFs(fsType) {
 export function chooseDockerWorkspaceStrategy({
   location = DEFAULT_WORKSPACE_LOCATION,
   hostPath = null,
+  bindTarget = SAVES_BIND_TARGET,
   mode = 'auto',
   platform = process.platform,
 } = {}) {
@@ -124,7 +153,7 @@ export function chooseDockerWorkspaceStrategy({
 
   const fsType = probeHostFsType(hostPath);
   if (normalizedMode === 'bind-mount') {
-    return describeBindMountStrategy({ location, hostPath, fsType });
+    return describeBindMountStrategy({ location, hostPath, bindTarget, fsType });
   }
   if (!isFastLocalFs(fsType)) {
     return describeRuntimeInternalStrategy({
@@ -132,7 +161,7 @@ export function chooseDockerWorkspaceStrategy({
       reason: `fs:${fsType || 'unknown'}`,
     });
   }
-  return describeBindMountStrategy({ location, hostPath, fsType });
+  return describeBindMountStrategy({ location, hostPath, bindTarget, fsType });
 }
 
 export function resolveWorkspaceStrategy({

@@ -31,7 +31,7 @@ export class CommandService {
       );
     }
 
-    const remoteScript = remoteCommandPath(step, command);
+    const remoteScript = session.tempScriptPath(step, command);
     await session.uploadScript(commandSpec.script, remoteScript);
     const result = await session.runCaptured(remoteScript);
     const passed = result.exitCode === 0;
@@ -75,7 +75,7 @@ export class CommandService {
       );
     }
 
-    const remoteScript = remoteCommandPath(step, command);
+    const remoteScript = ensured.session.tempScriptPath(step, command);
     await ensured.session.uploadScript(commandSpec.script, remoteScript);
     terminal.runScript(remoteScript);
     return {
@@ -111,9 +111,5 @@ export class CommandService {
     const ensured = await this.ensureRuntime(auth);
     return ensured.session;
   }
-}
-
-function remoteCommandPath(stepId, commandId) {
-  return `/tmp/${validateSafePath(stepId)}.${validateSafePath(commandId)}.sh`;
 }
 

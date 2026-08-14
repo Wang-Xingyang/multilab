@@ -102,7 +102,7 @@ Required:
 Optional:
 
 - `chain`: group id for continuous projects.
-- `entry_file`: default file to open.
+- `entry_file`: default editor tab when this step has no saved UI state. The player does not open every workspace file.
 
 ## `inherit_mode`
 

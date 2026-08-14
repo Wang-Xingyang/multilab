@@ -16,12 +16,14 @@ export class KernelRegistry {
         const networkOk = networkRequired
           ? kernel.network_default !== 'none'
           : kernel.network_default === 'none';
+        const unimplemented = kernel.implemented === false;
         return {
           kernel,
           match,
           networkOk,
+          unimplemented,
           recommended: Boolean(pkg.recommended_kernel && kernel.id === pkg.recommended_kernel),
-          compatible: match.ok && networkOk,
+          compatible: match.ok && networkOk && !unimplemented,
         };
       })
       .sort((a, b) => Number(b.recommended) - Number(a.recommended));
@@ -44,6 +46,7 @@ export class KernelRegistry {
         recommended: candidate.recommended,
         compatible: candidate.compatible,
         network_ok: candidate.networkOk,
+        unimplemented: candidate.unimplemented,
         missing_capabilities: candidate.match.missingCapabilities,
         missing_commands: candidate.match.missingCommands,
         version_mismatches: candidate.match.versionMismatches,
@@ -91,6 +94,25 @@ export function createDefaultKernelRegistry({ image, workspaceDir }) {
         network_default: 'bridge',
         // Host binds these container ports to 127.0.0.1 ephemeral ports.
         publish_ports: [8080, 3000, 5173, 8000],
+      },
+      {
+        id: 'wsl-system-gcc',
+        display_name: 'WSL System GCC (placeholder)',
+        provider: 'wsl',
+        platform: 'linux',
+        workspace: workspaceDir,
+        user: process.env.USER || 'student',
+        implemented: false,
+        trusted_only: true,
+        capabilities: ['tty', 'compile', 'debug', 'signals'],
+        commands: {
+          gcc: '13.3.0',
+          gdb: '15.0.0',
+          bash: '5.2.0',
+          make: '4.3.0',
+        },
+        sandbox_presets: ['none'],
+        network_default: 'none',
       },
     ],
   });

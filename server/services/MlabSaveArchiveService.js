@@ -77,6 +77,11 @@ async function readArchiveFiles(archivePath) {
       zipFile.on('entry', async entry => {
         try {
           if (/\/$/.test(entry.fileName)) {
+            const relPath = safeArchivePath(entry.fileName.replace(/\/+$/, '')) + '/';
+            if (files.has(relPath)) {
+              throw Object.assign(new Error(`duplicate archive path: ${relPath}`), { statusCode: 400 });
+            }
+            files.set(relPath, Buffer.alloc(0));
             zipFile.readEntry();
             return;
           }
@@ -135,15 +140,19 @@ function safeArchivePath(name) {
 
 async function writeZipArchive(outputPath, files) {
   const entries = Array.from(files.entries())
-    .map(([name, content]) => ({
-      name: safeArchivePath(name),
-      content: Buffer.isBuffer(content) ? content : Buffer.from(String(content || ''), 'utf8'),
-    }))
+    .map(([name, content]) => {
+      const isDir = String(name).endsWith('/');
+      return {
+        name: isDir ? `${safeArchivePath(name.replace(/\/+$/, ''))}/` : safeArchivePath(name),
+        content: Buffer.isBuffer(content) ? content : Buffer.from(String(content || ''), 'utf8'),
+      };
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const zipFile = new yazl.ZipFile();
   for (const entry of entries) {
-    zipFile.addBuffer(entry.content, entry.name);
+    if (entry.name.endsWith('/')) zipFile.addEmptyDirectory(entry.name);
+    else zipFile.addBuffer(entry.content, entry.name);
   }
 
   await new Promise((resolve, reject) => {

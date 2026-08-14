@@ -47,11 +47,25 @@ export function createHostFsWatcher(strategy, onChange, { debounceMs = 75, maxDe
     }, debounceMs);
   };
 
-  const watcher = watch(strategy.hostPath, { recursive: true }, () => {
-    schedule();
-  });
-  watcher.on('error', () => {
-    // Keep the connection alive; the next successful event rescans.
+  // Watch the Docker bind source (saves root) when present — nested watches
+  // on a subdirectory of that mount miss container writes on some hosts.
+  // Signature compare still uses strategy.hostPath (the current step files/).
+  const watchRoots = uniqueExistingPaths([
+    strategy.hostPath,
+    strategy.bindHostPath,
+  ]);
+  if (!watchRoots.length) {
+    throw new Error('createHostFsWatcher: no watchable host path');
+  }
+
+  const watchers = watchRoots.map(root => {
+    const watcher = watch(root, { recursive: true }, () => {
+      schedule();
+    });
+    watcher.on('error', () => {
+      // Keep the connection alive; the next successful event rescans.
+    });
+    return watcher;
   });
 
   compare();
@@ -63,7 +77,22 @@ export function createHostFsWatcher(strategy, onChange, { debounceMs = 75, maxDe
         clearTimeout(timer);
         timer = null;
       }
-      try { watcher.close(); } catch { /* already closed */ }
+      for (const watcher of watchers) {
+        try { watcher.close(); } catch { /* already closed */ }
+      }
     },
   };
+}
+
+function uniqueExistingPaths(paths) {
+  const seen = new Set();
+  const out = [];
+  for (const raw of paths) {
+    if (!raw) continue;
+    const resolved = String(raw);
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    out.push(resolved);
+  }
+  return out;
 }

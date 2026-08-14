@@ -15,7 +15,7 @@ MultiLab is an interactive tutorial player:
 ```text
 tutorial package   read-only learning material (template files, scripts, markdown)
 save bundle        durable learner-owned state (files + save.json)
-live workspace     scratch copy the learner edits and the runtime executes against
+workspace          the current step's save files directory
 runtime session    disposable execution environment (currently Docker)
 ```
 
@@ -54,15 +54,17 @@ Docker runtime
   NetworkMode/security options from selected kernel
 ```
 
-Docker is currently the only implemented provider. `RuntimeManager` selects a provider from the resolved kernel's `provider` field, then asks that provider to apply kernel image/network/sandbox settings before starting a session.
+Docker is the implemented provider. A WSL provider exists as a `501` placeholder (`WslRuntimeProvider`, kernel `wsl-system-gcc`, `implemented: false`) and is not auto-selected. `RuntimeManager` selects a provider from the resolved kernel's `provider` field, then asks that provider to apply kernel image/network/sandbox settings before starting a session.
 
-The live workspace is logically owned by MultiLab through `WorkspaceService`. The physical location and IO strategy are chosen by the runtime provider (`RuntimeProvider.workspaceStrategy`).
+The workspace is logically owned by MultiLab through `WorkspaceService`. The physical location and IO strategy are chosen by the runtime provider (`RuntimeProvider.workspaceStrategy`).
 
-On Linux/WSL with a fast local filesystem (ext4/xfs/btrfs/tmpfs), Docker bind-mounts `.multilab-state/workspaces/live` to `/home/student/workspace`. `WorkspaceService` then reads, writes, lists, and watches the host directory directly. File-tree updates use host `fs.watch` with a short debounce (content-only edits still do not fire).
+On Linux/WSL with a fast local filesystem (ext4/xfs/btrfs/tmpfs), Docker bind-mounts `.multilab-state/saves` to `/home/student/.mlab-saves`. The current step's `steps/<id>/files/` directory **is** the workspace. `/home/student/workspace` is retargeted on step load (`mount --bind` when the exec is allowed, otherwise a symlink). The learner-visible path stays `/home/student/workspace`; the physical `.mlab-saves/<id>/<version>/<digest>/...` tree must not appear in the shell prompt. `WorkspaceService` reads, writes, lists, and watches that save directory on the host. File-tree updates use host `fs.watch` on the bind source plus `find -H` polling as a safety net (content-only edits still do not fire). `find` without `-H` does not descend a symlink start path, so polling must pass `-H`.
+
+The container `student` uid is aligned to the host process uid so terminal `mkdir` and host Node share ownership. `EACCES` during host clear still falls back to a container-root wipe.
 
 Docker Desktop Windows/macOS, Windows-drive mounts (`/mnt/c`), and unknown/slow filesystems keep `runtime-internal` copy/sync through `RuntimeSession.exec`. Override with `WORKSPACE_STRATEGY=bind-mount` or `WORKSPACE_STRATEGY=runtime-internal`. Volume-sync for Docker Desktop is not implemented. Runtime kernels provide execution capability; they should not require a MultiLab-specific in-kernel agent.
 
-The bind-mounted scratch directory is mode `0777` / files `0666` because the host uid and the container `student` uid may differ (Ubuntu 24.04 images often already have uid 1000). This is acceptable for a local single-user scratch workspace.
+Captured command scripts are uploaded through `RuntimeSession.tempScriptPath()` (Docker/WSL: `/tmp/<step>.<command>.sh`), not into the save directory. Build artifacts belong in the kernel `/tmp`, not the workspace.
 
 ## Tutorial Loading
 
@@ -242,6 +244,7 @@ Each step has:
 
 - `template`: package files under `steps/<id>/files/` (read-only);
 - `save`: durable learner files for this step, owned by `SaveService`;
+- `ui`: per-step editor/layout state (`open_files`, `active_file`, plus reserved keys for later preview panes);
 - `workspace`: live scratch files currently present for editing and execution, owned by `WorkspaceService`;
 - `inherit_mode`: first-entry initialization rule.
 
@@ -260,9 +263,9 @@ overlay_template
 
 Current implementation intentionally does not overwrite learner files during `overlay_template`.
 
-Step load/save/reset is handled by `server/services/SaveService.js`. It owns save identity paths, host save file IO, first-entry inheritance, reset behavior, and progress metadata. It asks `WorkspaceService` to sync template/save files into the live workspace and to snapshot the live workspace back into the save directory.
+Step load/save/reset is handled by `server/services/SaveService.js`. It owns save identity paths, host save file IO, first-entry inheritance, reset behavior, and progress metadata. On bind-mount, the step `files/` directory is the workspace: load retargets `/home/student/workspace`, save flushes editor buffers into that directory, and reset rewrites template files in place. `runtime-internal` still copies through `RuntimeSession.writeFiles` / `readFiles`.
 
-`WorkspaceService` owns workspace initialization, scoped file IO (`/api/fs/*`), snapshot, export, and watch. File APIs and the WebSocket `fs_change` watcher go through this service rather than talking to Docker directly. On Linux/WSL ext4, Docker bind-mounts a host workspace and `WorkspaceService` uses host IO; elsewhere it still copies through `RuntimeSession.writeFiles` / `readFiles`.
+`WorkspaceService` owns workspace initialization, scoped file IO (`/api/fs/*`), snapshot, export, and watch. File APIs and the WebSocket `fs_change` watcher go through this service rather than talking to Docker directly. Bind-mount step load falls back to a container-root wipe when host `rm` hits `EACCES`.
 
 ## Save Storage
 
@@ -270,7 +273,19 @@ Current prototype saves are stored under `.multilab-state`, but the identity now
 
 ```text
 multilab/.multilab-state/saves/<id>/<version>/<digest>/steps/<step>/files/
+multilab/.multilab-state/saves/<id>/<version>/<digest>/steps/<step>/ui.json
 ```
+
+`files/` is the learner workspace for that step, including empty directories and nested paths such as `src/foo.c`. `ui.json` records which editor tabs were open:
+
+```json
+{
+  "open_files": ["hello.c"],
+  "active_file": "hello.c"
+}
+```
+
+Unknown `ui.json` keys are preserved for later special windows (preview panes, etc.). If `ui.json` is missing, the player opens `entry_file` only rather than every saved file.
 
 The digest is a deterministic `sha256:<hex>` over the tutorial package directory contents. The filesystem path uses a safe `sha256-<hex>` segment.
 
@@ -293,7 +308,9 @@ Archive layout:
 
 ```text
 save.json
-steps/<step-id>/files/<file>
+steps/<step-id>/ui.json
+steps/<step-id>/files/<relative-path>
+steps/<step-id>/files/<empty-dir>/
 ```
 
 The archive references package `id` / `version` / `digest` and does not embed the tutorial package. Import requires a matching development or installed package source; if none exists, the API returns `code: "package_missing"` and asks the user to open/import the original `.mlab` first.
@@ -322,7 +339,7 @@ Do not use Git as the live step state machine.
 Current practical protections:
 
 - code runs as non-root `student`;
-- file APIs restrict paths to the live workspace root (`/home/student/workspace` for current Docker kernels);
+- file APIs restrict paths to the workspace root (`/home/student/workspace` for current Linux kernels);
 - tutorial scripts are loaded from package paths after path validation;
 - test/check commands run inside the Docker runtime, not on the host.
 - package trust defaults to `untrusted` and is stored by package digest under `.multilab-state/trust.json`.
@@ -388,13 +405,13 @@ The UI shows a kernel selector for compatible candidates and a "重连终端" bu
 
 ## Known Limitations
 
-- Docker is still the only implemented provider.
-- Docker workspace strategy is `bind-mount` on Linux/WSL ext4 and `runtime-internal` elsewhere. Volume-sync / host-local strategies are not implemented.
-- File-tree watch uses host `fs.watch` for bind-mount and find-polling as the fallback.
+- Docker is the implemented provider; WSL is a registered `501` placeholder (`wsl-system-gcc`).
+- Docker workspace strategy is `bind-mount` on Linux/WSL ext4 (saves tree → `/home/student/.mlab-saves`, workspace retargeted per step) and `runtime-internal` elsewhere. Volume-sync is not implemented.
+- File-tree watch uses host `fs.watch` on the bind source plus `find -H` polling so a workspace symlink still refreshes. The shell prompt maps `.mlab-saves/.../files` to `~/workspace`.
 - `.mlab` pack/unpack CLI, host-path import, and browser upload/open are implemented.
 - `.mlab-save` host-path export/import and browser upload/download are implemented.
-- Kernel registry is static and only contains the default Docker kernel.
-- Runtime selection follows resolved kernel plus optional per-package user preference; only one Docker kernel is registered today.
+- Kernel registry is static (default Docker kernels plus the WSL placeholder).
+- Runtime selection follows resolved kernel plus optional per-package user preference.
 - Package library management covers list/detail/open/delete; bulk cleanup and save-linked cleanup are not implemented.
 - Panel declarations drive tutorial/terminal/file-tree visibility and a right-hand aux panel for `test-results` / `web-preview` / `logs` / `diagnostics`. Progress UI reads `save.json` metadata from step APIs. Trust changes use a confirmation dialog. Frontend logic lives in `public/js/` ES modules without a bundler: shared `state.js` / `messages.js` (`t('group.key')`) plus feature modules (`tutorial`, `files`, `commands`, `panels`, `terminal`, …). Background long-running preview processes remain open; further live-web work is deprioritized in favor of HTML preview.
 - The Docker container is single-session and intended for local single-user use.

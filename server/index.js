@@ -2,8 +2,8 @@
 // 职责:
 //   1. 静态服务前端 (public/)
 //   2. 提供 /api/tutorials 列表 + 详情
-//   3. 通过 WebSocket 把用户代码/命令转发到 Docker 容器内的 exec 会话
-//      exec.start({tty:true}) 返回双向流,支持交互式 gdb / REPL
+//   3. 通过 WebSocket 把终端接到 RuntimeSession.attachTerminal
+//      （当前实现是 Docker exec TTY，后续可换 WSL/local）
 
 import 'dotenv/config';
 import express from 'express';
@@ -13,6 +13,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { DockerRuntimeProvider } from './runtime/DockerRuntimeProvider.js';
+import { WslRuntimeProvider } from './runtime/WslRuntimeProvider.js';
 import { RuntimeManager } from './runtime/RuntimeManager.js';
 import { PackageService } from './services/PackageService.js';
 import { SaveService } from './services/SaveService.js';
@@ -46,15 +47,19 @@ const RUNTIME_STATE_DIR = process.env.RUNTIME_STATE_DIR
 const PACKAGE_LIBRARY_DIR = process.env.PACKAGE_LIBRARY_DIR
   ? path.resolve(__dirname, process.env.PACKAGE_LIBRARY_DIR)
   : path.join(RUNTIME_STATE_DIR, 'packages');
-const HOST_WORKSPACE_DIR = process.env.HOST_WORKSPACE_DIR
-  ? path.resolve(__dirname, process.env.HOST_WORKSPACE_DIR)
-  : path.join(RUNTIME_STATE_DIR, 'workspaces', 'live');
+const HOST_SAVES_DIR = process.env.HOST_SAVES_DIR
+  ? path.resolve(__dirname, process.env.HOST_SAVES_DIR)
+  : path.join(RUNTIME_STATE_DIR, 'saves');
 
 const dockerRuntimeProvider = new DockerRuntimeProvider({
   image: EXEC_IMAGE,
   containerName: CONTAINER_NAME,
   workspaceDir: WORKSPACE_DIR,
-  hostWorkspaceDir: HOST_WORKSPACE_DIR,
+  hostSavesDir: HOST_SAVES_DIR,
+});
+const wslRuntimeProvider = new WslRuntimeProvider({
+  workspaceDir: WORKSPACE_DIR,
+  hostSavesDir: HOST_SAVES_DIR,
 });
 const archiveService = new MlabArchiveService();
 const packageLibrary = new PackageLibrary({
@@ -71,7 +76,7 @@ const kernelRegistry = createDefaultKernelRegistry({
 });
 const kernelSelectionStore = new KernelSelectionStore({ runtimeStateDir: RUNTIME_STATE_DIR });
 const runtimeManager = new RuntimeManager({
-  providers: { docker: dockerRuntimeProvider },
+  providers: { docker: dockerRuntimeProvider, wsl: wslRuntimeProvider },
   kernelRegistry,
   packageService,
   kernelSelectionStore,
@@ -465,9 +470,9 @@ app.post('/api/steps/load', async (req, res) => {
 // 保存当前 workspace 为 step 的唯一逻辑 save
 app.post('/api/steps/save', async (req, res) => {
   try {
-    const { tutorial, step, files } = req.body;
+    const { tutorial, step, files, ui } = req.body;
     if (!tutorial || !step) return res.status(400).json({ error: 'tutorial and step required' });
-    res.json(await saveService.saveStepState(tutorial, step, files));
+    res.json(await saveService.saveStepState(tutorial, step, files, { ui }));
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message });
   }

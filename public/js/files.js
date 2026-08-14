@@ -45,23 +45,50 @@ function setEditorEmpty(message = t('files.emptyEditor')) {
   state.suppressModified = false;
 }
 
-function loadFilesIntoEditor(files) {
-  state.currentFiles = (files || []).map(f => ({
-    name: f.name,
-    language: f.language || langForName(f.name),
-    content: f.content || '',
-    originalContent: f.content || '',
-  }));
+function loadFilesIntoEditor(files, { ui, entryFile } = {}) {
+  const all = (files || []).filter(f => f.type !== 'dir');
+  const byName = new Map(all.map(f => [f.name, f]));
+  const requested = Array.isArray(ui?.open_files) ? ui.open_files : null;
+  let names;
+  if (requested) {
+    names = requested.filter(name => byName.has(name));
+    if (names.length === 0 && requested.length > 0) {
+      names = entryFile && byName.has(entryFile) ? [entryFile] : (all[0] ? [all[0].name] : []);
+    }
+  } else if (entryFile && byName.has(entryFile)) {
+    names = [entryFile];
+  } else {
+    names = all[0] ? [all[0].name] : [];
+  }
+
+  state.currentFiles = names.map(name => {
+    const f = byName.get(name);
+    return {
+      name: f.name,
+      language: f.language || langForName(f.name),
+      content: f.content || '',
+      originalContent: f.content || '',
+    };
+  });
   state.fileModified = state.currentFiles.map(() => false);
-  state.activeFileIndex = state.currentFiles.length > 0 ? 0 : -1;
+  const activeName = (ui?.active_file && names.includes(ui.active_file))
+    ? ui.active_file
+    : (names[0] || null);
+  state.activeFileIndex = activeName ? names.indexOf(activeName) : -1;
   renderFileTabs();
-  if (state.currentFiles.length > 0) {
-    switchFile(0, true);
+  if (state.activeFileIndex >= 0) {
+    switchFile(state.activeFileIndex, true);
   } else {
     setEditorEmpty();
   }
   state.fileListCache = null;
   if (panelDeclared('file-tree')) refreshFileTree(true);
+}
+
+function currentStepUi() {
+  const open_files = state.currentFiles.map(f => f.name);
+  const active = state.currentFiles[state.activeFileIndex]?.name || open_files[0] || null;
+  return { open_files, active_file: active };
 }
 
 // ========== 文件标签栏 ==========
@@ -118,6 +145,10 @@ function closeFile(idx) {
 }
 
 // ========== 保存 / Reset / 打开容器文件 ==========
+// Persist this step: Monaco buffers → live workspace, then snapshot the
+// whole live dir (including terminal-created files) into the step save.
+// The Save button uses force:true. Step switch / run / export should too,
+// otherwise a not-dirty editor would skip snapshot and drop `touch` files.
 async function saveCurrentStep(opts = {}) {
   const step = currentStepObj();
   if (!state.currentTutorial || !step) return;
@@ -128,6 +159,7 @@ async function saveCurrentStep(opts = {}) {
     tutorial: currentTutorialKey(),
     step: step.id,
     files: state.currentFiles.map(f => ({ name: f.name, content: f.content })),
+    ui: currentStepUi(),
   });
   state.currentFiles.forEach(f => { f.originalContent = f.content; });
   state.fileModified = state.currentFiles.map(() => false);
@@ -160,7 +192,10 @@ async function resetCurrentStep() {
   if (!ok) return;
   try {
     const result = await apiJson('/api/steps/reset', { tutorial: currentTutorialKey(), step: step.id });
-    loadFilesIntoEditor(result.files || []);
+    loadFilesIntoEditor(result.files || [], {
+      ui: result.ui,
+      entryFile: step.entry_file,
+    });
     applyProgress(result.progress);
     appendSessionLog(t('save.resetLog', { id: step.id }), 'warn');
     toast(t('save.resetDone'));

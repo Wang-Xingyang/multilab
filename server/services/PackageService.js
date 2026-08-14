@@ -34,6 +34,19 @@ export function validateFileName(name) {
   return name;
 }
 
+export function validateWorkspaceRelPath(relPath) {
+  const raw = String(relPath || '');
+  if (!raw || raw.startsWith('/') || raw.includes('\\') || raw.includes('\0')) {
+    throw Object.assign(new Error('Invalid workspace path'), { statusCode: 400 });
+  }
+  const parts = raw.split('/');
+  if (parts.length > 8 || parts.some(part => !part || part === '.' || part === '..')) {
+    throw Object.assign(new Error('Invalid workspace path'), { statusCode: 400 });
+  }
+  for (const part of parts) validateFileName(part);
+  return parts.join('/');
+}
+
 export function stepInheritMode(step) {
   const explicit = step.inherit_mode;
   if (explicit && VALID_INHERIT_MODES.has(explicit)) return explicit;

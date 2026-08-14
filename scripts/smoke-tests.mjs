@@ -15,7 +15,7 @@ import { fileURLToPath } from 'url';
 
 import { normalizePanels, FALLBACK_PANELS } from '../server/services/PanelModel.js';
 import { createDefaultKernelRegistry, packageNeedsNetwork } from '../server/services/KernelRegistry.js';
-import { PackageService } from '../server/services/PackageService.js';
+import { PackageService, validateWorkspaceRelPath } from '../server/services/PackageService.js';
 import { SaveService } from '../server/services/SaveService.js';
 import {
   WorkspaceService,
@@ -28,9 +28,18 @@ import {
   describeRuntimeInternalStrategy,
   describeBindMountStrategy,
   chooseDockerWorkspaceStrategy,
+  SAVES_BIND_TARGET,
 } from '../server/workspace/WorkspaceStrategy.js';
 import { createHostFsWatcher } from '../server/workspace/HostFsWatcher.js';
-import { RuntimeProvider } from '../server/runtime/RuntimeProvider.js';
+import {
+  readHostWorkspaceFiles,
+  writeHostWorkspaceFiles,
+  clearHostDirContents,
+  wipeBindMountViaExec,
+} from '../server/workspace/HostWorkspace.js';
+import { RuntimeProvider, RuntimeSession } from '../server/runtime/RuntimeProvider.js';
+import { WslRuntimeProvider } from '../server/runtime/WslRuntimeProvider.js';
+import { displayLearnerPath, learnerShellEnv } from '../server/runtime/learnerShellEnv.js';
 import { MlabSaveArchiveService } from '../server/services/MlabSaveArchiveService.js';
 import { KernelSelectionStore } from '../server/services/KernelSelectionStore.js';
 import { sanitizeUploadFilename } from '../server/services/TempArchiveUpload.js';
@@ -52,18 +61,44 @@ let passed = 0;
 let failed = 0;
 
 function createMemoryWorkspaceSession(initialFiles = []) {
-  const files = new Map(initialFiles.map(file => [file.name, file.content || '']));
+  const DIR = { type: 'dir' };
+  const files = new Map();
+  const rememberParents = (name) => {
+    const parts = String(name).split('/');
+    let acc = '';
+    for (let i = 0; i < parts.length - 1; i++) {
+      acc = acc ? `${acc}/${parts[i]}` : parts[i];
+      if (!files.has(acc)) files.set(acc, DIR);
+    }
+  };
+  for (const file of initialFiles) {
+    if (file.type === 'dir') files.set(file.name, DIR);
+    else {
+      rememberParents(file.name);
+      files.set(file.name, file.content || '');
+    }
+  }
   const session = {
     workspaceDir: '/home/student/workspace',
     async ensureWorkspace() {},
     async writeFiles(next, opts = {}) {
       if (opts.clear !== false) files.clear();
-      for (const file of next || []) files.set(file.name, file.content || '');
+      for (const file of next || []) {
+        if (file.type === 'dir') files.set(file.name, DIR);
+        else {
+          rememberParents(file.name);
+          files.set(file.name, file.content || '');
+        }
+      }
     },
     async readFiles() {
       return [...files.entries()]
         .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([name, content]) => ({ name, content }));
+        .map(([name, content]) => (
+          content && typeof content === 'object' && content.type === 'dir'
+            ? { name, type: 'dir' }
+            : { name, type: 'file', content }
+        ));
     },
     async uploadScript(content, filePath) {
       const name = String(filePath || '').split('/').pop();
@@ -76,7 +111,15 @@ function createMemoryWorkspaceSession(initialFiles = []) {
         const format = printfIdx >= 0 ? args[printfIdx + 1] : '%f\n';
         const names = [...files.keys()].sort();
         if (String(format).includes('%y')) {
-          return { stdout: names.map(name => `f\t${name}\n`).join(''), stderr: '', exitCode: 0 };
+          return {
+            stdout: names.map(name => {
+              const val = files.get(name);
+              const kind = val && typeof val === 'object' && val.type === 'dir' ? 'd' : 'f';
+              return `${kind}\t${name}\n`;
+            }).join(''),
+            stderr: '',
+            exitCode: 0,
+          };
         }
         return { stdout: names.map(name => `${name}\n`).join(''), stderr: '', exitCode: 0 };
       }
@@ -166,6 +209,26 @@ await test('KernelRegistry preferred kernel selection', () => {
   const missing = registry.resolveForPackage(pkg, { preferredKernelId: 'nope' });
   assert.equal(missing.preferred_applied, false);
   assert.equal(missing.selected.id, 'gcc-ubuntu24-docker');
+  const wsl = registry.listKernels().find(kernel => kernel.id === 'wsl-system-gcc');
+  assert.ok(wsl);
+  assert.equal(wsl.implemented, false);
+  const resolved = registry.resolveForPackage(pkg);
+  assert.equal(resolved.selected.id, 'gcc-ubuntu24-docker');
+  assert.equal(resolved.candidates.find(c => c.id === 'wsl-system-gcc')?.compatible, false);
+});
+
+await test('WslRuntimeProvider is a 501 placeholder', async () => {
+  const provider = new WslRuntimeProvider({ hostSavesDir: '/tmp/saves' });
+  assert.equal(provider.kind, 'wsl');
+  await assert.rejects(
+    () => provider.startSession(),
+    (error) => error.code === 'provider_unimplemented' && error.statusCode === 501
+  );
+});
+
+await test('RuntimeSession.tempScriptPath lives on the session', () => {
+  const session = new RuntimeSession();
+  assert.equal(session.tempScriptPath('01-first-program', 'test'), '/tmp/01-first-program.test.sh');
 });
 
 await test('PackageService loads hello-c with ui_panels', async () => {
@@ -359,6 +422,7 @@ await test('chooseDockerWorkspaceStrategy bind-mounts linux ext4 and refuses slo
     if (process.platform === 'linux') {
       assert.equal(auto.kind, WORKSPACE_STRATEGY_KINDS.BIND_MOUNT);
       assert.equal(auto.hostPath, tmp);
+      assert.equal(auto.bindTarget, SAVES_BIND_TARGET);
       assert.equal(auto.capabilities.hostReadable, true);
       assert.equal(auto.watch, 'host-fs');
     } else {
@@ -402,6 +466,85 @@ await test('WorkspaceService bind-mount writes on host without session.exec', as
   }
 });
 
+await test('SaveService bind-mount load points workspace at the step save dir', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-save-bind-'));
+  try {
+    const saves = path.join(tmp, 'saves');
+    const pointed = [];
+    const session = {
+      workspaceDir: '/home/student/workspace',
+      workspaceStrategy: describeBindMountStrategy({
+        location: '/home/student/workspace',
+        hostPath: saves,
+        bindTarget: SAVES_BIND_TARGET,
+      }),
+      async ensureWorkspace() {},
+      async pointWorkspace(target) { pointed.push(target); },
+      async exec() { throw new Error('session.exec should not run for bind-mount IO'); },
+      async writeFiles() { throw new Error('session.writeFiles should not run for bind-mount IO'); },
+      async readFiles() { throw new Error('session.readFiles should not run for bind-mount IO'); },
+    };
+    const workspaceService = new WorkspaceService({ runtimeSession: session });
+    const packageService = new PackageService({ tutorialsDir: TUTORIALS_DIR });
+    const saveService = new SaveService({
+      runtimeStateDir: tmp,
+      workspaceService,
+      packageService,
+    });
+    const loaded = await saveService.loadStepState('hello-c', '01-first-program');
+    const cfg = await packageService.loadTutorial('hello-c');
+    const dest = saveService.saveDir(cfg, '01-first-program');
+    assert.equal(workspaceService.describe().hostPath, dest);
+    assert.equal(pointed.length, 1);
+    assert.ok(pointed[0].startsWith(`${SAVES_BIND_TARGET}/`));
+    assert.ok(pointed[0].endsWith('/steps/01-first-program/files'));
+    assert.ok(loaded.files.some(file => file.name === 'hello.c'));
+    const onDisk = await fs.readFile(path.join(dest, 'hello.c'), 'utf8');
+    assert.ok(onDisk.includes('main') || onDisk.length > 0);
+
+    await workspaceService.writeFiles([{ name: 'hello.c', content: 'changed\n' }], { clear: false });
+    await saveService.saveStepState('hello-c', '01-first-program');
+    assert.equal(await fs.readFile(path.join(dest, 'hello.c'), 'utf8'), 'changed\n');
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('HostWorkspace chmod+rm clears a 0555 dir the host owns', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-perm-'));
+  try {
+    const hostPath = path.join(tmp, 'live');
+    const strategy = describeBindMountStrategy({
+      location: '/home/student/workspace',
+      hostPath,
+    });
+    await writeHostWorkspaceFiles(strategy, [
+      { name: 'keep.c', content: 'old\n' },
+      { name: 'locked/x', content: 'secret\n' },
+    ]);
+    await fs.chmod(path.join(hostPath, 'locked'), 0o555);
+    await clearHostDirContents(hostPath);
+    await assert.rejects(() => fs.access(path.join(hostPath, 'locked')));
+    await writeHostWorkspaceFiles(strategy, [{ name: 'hello.c', content: 'ok\n' }]);
+    assert.equal(await fs.readFile(path.join(hostPath, 'hello.c'), 'utf8'), 'ok\n');
+  } finally {
+    await fs.chmod(path.join(tmp, 'live', 'locked'), 0o777).catch(() => {});
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('wipeBindMountViaExec chmods and rm as root', async () => {
+  const calls = [];
+  await wipeBindMountViaExec(async (cmd, opts) => {
+    calls.push({ cmd, opts });
+    return { stdout: '', stderr: '', exitCode: 0 };
+  }, '/home/student/workspace');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].opts.user, 'root');
+  assert.ok(String(calls[0].cmd[2]).includes('chmod -R a+rwX'));
+  assert.ok(String(calls[0].cmd[2]).includes('find'));
+});
+
 await test('HostFsWatcher fires on add, not on content-only edits', async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-watch-'));
   try {
@@ -423,6 +566,34 @@ await test('HostFsWatcher fires on add, not on content-only edits', async () => 
     await fs.writeFile(path.join(hostPath, 'a.c'), 'changed\n');
     await new Promise(resolve => setTimeout(resolve, 120));
     assert.equal(fired, afterAdd, 'content-only edit must not fire');
+    watcher.stop();
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('HostFsWatcher on bind source fires for nested step files', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-watch-bind-'));
+  try {
+    const bindHostPath = path.join(tmp, 'saves');
+    const hostPath = path.join(bindHostPath, 'hello-c', '1.0.0', 'digest', 'steps', '01', 'files');
+    await fs.mkdir(hostPath, { recursive: true });
+    await fs.writeFile(path.join(hostPath, 'a.c'), 'a\n');
+    const strategy = {
+      ...describeBindMountStrategy({
+        location: '/home/student/workspace',
+        hostPath,
+        bindTarget: SAVES_BIND_TARGET,
+      }),
+      bindHostPath,
+    };
+    let fired = 0;
+    const watcher = createHostFsWatcher(strategy, () => { fired += 1; }, { debounceMs: 40 });
+    await new Promise(resolve => setTimeout(resolve, 80));
+    const before = fired;
+    await fs.mkdir(path.join(hostPath, 'nested'), { recursive: true });
+    await new Promise(resolve => setTimeout(resolve, 160));
+    assert.ok(fired > before, `expected nested mkdir to fire via bind source watch, before=${before} after=${fired}`);
     watcher.stop();
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
@@ -470,9 +641,11 @@ await test('WorkspaceService tree sort keeps dirs before files and parents first
 
 await test('FindPollingWatcher fires when find signature changes', async () => {
   let execCount = 0;
+  const cmds = [];
   const session = {
     workspaceDir: '/home/student/workspace',
-    async exec() {
+    async exec(cmd) {
+      cmds.push(cmd);
       execCount += 1;
       const stdout = execCount === 1 ? 'f\ta.c\n' : 'f\ta.c\nf\tb.c\n';
       return { stdout, stderr: '', exitCode: 0 };
@@ -484,6 +657,21 @@ await test('FindPollingWatcher fires when find signature changes', async () => {
   watcher.stop();
   assert.ok(execCount >= 2, `expected at least 2 polls, got ${execCount}`);
   assert.ok(fired >= 1, `expected onChange, got ${fired}`);
+  assert.equal(cmds[0][0], 'find');
+  assert.equal(cmds[0][1], '-H', 'find must follow a symlink workspace start path');
+});
+
+await test('displayLearnerPath hides the physical save tree', () => {
+  const physical = '/home/student/.mlab-saves/hello-c/1.0.0/sha256-8468b2e6412650f97a3ad351eb73828fff25031abe4665938110d50f09c2e2c8/steps/01-first-program/files';
+  assert.equal(displayLearnerPath(physical), '~/workspace');
+  assert.equal(displayLearnerPath(`${physical}/test/c`), '~/workspace/test/c');
+  assert.equal(displayLearnerPath('/home/student/workspace'), '~/workspace');
+  assert.equal(displayLearnerPath('/home/student/workspace/src/main.c'), '~/workspace/src/main.c');
+  const env = learnerShellEnv();
+  const ps1 = env.find(item => item.startsWith('PS1='));
+  assert.ok(ps1, 'learner shell must set PS1');
+  assert.ok(!ps1.includes('\\w'), 'PS1 must not use \\w (it prints the physical save path)');
+  assert.ok(ps1.includes('.mlab-saves'), 'PS1 must rewrite .mlab-saves paths');
 });
 
 await test('SaveService.loadStepState template inherit syncs into workspace', async () => {
@@ -494,6 +682,8 @@ await test('SaveService.loadStepState template inherit syncs into workspace', as
     assert.equal(loaded.inheritMode, 'template');
     assert.equal(loaded.hasOwnSave, true);
     assert.ok(loaded.files.some(file => file.name === 'hello.c'));
+    assert.equal(loaded.ui.active_file, 'hello.c');
+    assert.deepEqual(loaded.ui.open_files, ['hello.c']);
     assert.ok(files.has('hello.c'));
     assert.equal(loaded.progress.current_step, '01-first-program');
   } finally {
@@ -514,6 +704,102 @@ await test('SaveService.saveStepState snapshots workspace into save dir', async 
       'utf8'
     );
     assert.equal(saved, 'changed\n');
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('validateWorkspaceRelPath accepts nested paths and rejects escapes', () => {
+  assert.equal(validateWorkspaceRelPath('src/foo.c'), 'src/foo.c');
+  assert.throws(() => validateWorkspaceRelPath('../secret'), /Invalid/);
+  assert.throws(() => validateWorkspaceRelPath('/abs'), /Invalid/);
+  assert.throws(() => validateWorkspaceRelPath('a//b'), /Invalid/);
+});
+
+await test('HostWorkspace snapshot keeps nested files and empty dirs', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-hostws-'));
+  try {
+    const strategy = describeBindMountStrategy({
+      location: '/home/student/workspace',
+      hostPath: tmp,
+    });
+    await writeHostWorkspaceFiles(strategy, [
+      { name: 'src/main.c', content: 'int x;\n' },
+      { name: 'notes', type: 'dir' },
+    ]);
+    const entries = await readHostWorkspaceFiles(strategy);
+    assert.ok(entries.some(entry => entry.name === 'src' && entry.type === 'dir'));
+    assert.ok(entries.some(entry => entry.name === 'src/main.c' && entry.content === 'int x;\n'));
+    assert.ok(entries.some(entry => entry.name === 'notes' && entry.type === 'dir'));
+    assert.ok((await fs.stat(path.join(tmp, 'notes'))).isDirectory());
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('SaveService snapshots nested files, empty dirs, and step UI', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-smoke-'));
+  try {
+    const { saveService, packageService, session } = createSaveService(tmp);
+    await saveService.loadStepState('hello-c', '01-first-program');
+    await session.writeFiles([
+      { name: 'hello.c', content: 'int main(){return 0;}\n' },
+      { name: 'src/util.h', content: '#pragma once\n' },
+      { name: 'empty', type: 'dir' },
+    ], { clear: true });
+    const saved = await saveService.saveStepState('hello-c', '01-first-program', null, {
+      ui: {
+        open_files: ['hello.c', 'src/util.h'],
+        active_file: 'src/util.h',
+        panes: [{ type: 'preview', id: 'web' }],
+      },
+    });
+    assert.deepEqual(saved.ui.open_files, ['hello.c', 'src/util.h']);
+    assert.equal(saved.ui.active_file, 'src/util.h');
+    assert.deepEqual(saved.ui.panes, [{ type: 'preview', id: 'web' }]);
+
+    const dest = saveService.saveDir(await packageService.loadTutorial('hello-c'), '01-first-program');
+    assert.equal(await fs.readFile(path.join(dest, 'src', 'util.h'), 'utf8'), '#pragma once\n');
+    assert.ok((await fs.stat(path.join(dest, 'empty'))).isDirectory());
+
+    const loaded = await saveService.loadStepState('hello-c', '01-first-program');
+    assert.ok(loaded.files.some(file => file.name === 'src/util.h'));
+    assert.ok(loaded.files.some(file => file.name === 'empty' && file.type === 'dir'));
+    assert.deepEqual(loaded.ui.open_files, ['hello.c', 'src/util.h']);
+    assert.equal(loaded.ui.active_file, 'src/util.h');
+    assert.deepEqual(loaded.ui.panes, [{ type: 'preview', id: 'web' }]);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('Save archive roundtrip keeps nested files, empty dirs, and ui.json', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-smoke-'));
+  try {
+    const { saveService, packageService } = createSaveService(tmp);
+    const archiveService = new MlabSaveArchiveService({ saveService });
+    await saveService.loadStepState('hello-c', '01-first-program');
+    await saveService.workspaceService.writeFiles([
+      { name: 'hello.c', content: 'int main(){return 0;}\n' },
+      { name: 'src/util.h', content: '#pragma once\n' },
+      { name: 'empty', type: 'dir' },
+    ], { clear: true });
+    await saveService.saveStepState('hello-c', '01-first-program', null, {
+      ui: { open_files: ['src/util.h'], active_file: 'src/util.h' },
+    });
+
+    const exportPath = path.join(tmp, 'nested.mlab-save');
+    await archiveService.exportArchive('hello-c', exportPath);
+    const cfg = await packageService.loadTutorial('hello-c');
+    await fs.rm(saveService.packageSaveRoot(cfg), { recursive: true, force: true });
+    const imported = await archiveService.importArchive(exportPath);
+    assert.deepEqual(imported.steps, ['01-first-program']);
+
+    const dest = saveService.saveDir(cfg, '01-first-program');
+    assert.equal(await fs.readFile(path.join(dest, 'src', 'util.h'), 'utf8'), '#pragma once\n');
+    assert.ok((await fs.stat(path.join(dest, 'empty'))).isDirectory());
+    const ui = JSON.parse(await fs.readFile(saveService.stepUiPath(cfg, '01-first-program'), 'utf8'));
+    assert.deepEqual(ui.open_files, ['src/util.h']);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

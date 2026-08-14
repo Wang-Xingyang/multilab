@@ -27,8 +27,10 @@ export function createFindPollingWatcher(
     throw new Error('createFindPollingWatcher: workspaceDir is required');
   }
 
+  // -H: follow a symlink start path (workspace may point at a save dir)
+  // without following symlinks inside the tree.
   const cmd = [
-    'find', root,
+    'find', '-H', root,
     '-maxdepth', String(maxDepth), '-mindepth', '1',
     '(', '-type', 'f', '-o', '-type', 'd', ')',
     '-printf', '%y\t%P\n',

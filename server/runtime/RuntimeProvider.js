@@ -56,6 +56,14 @@ export class RuntimeSession {
     throw new Error('RuntimeSession.resize() must be implemented');
   }
 
+  tempScriptPath(stepId, commandId) {
+    return `/tmp/${stepId}.${commandId}.sh`;
+  }
+
+  async pointWorkspace() {
+    // Optional. Bind-mount providers retarget /home/student/workspace at a save dir.
+  }
+
   /**
    * Watch the workspace filesystem for structural changes. Default is the
    * find-polling fallback owned by WorkspaceService. Providers with native

@@ -15,7 +15,7 @@ import assert from 'assert/strict';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { createWriteStream } from 'fs';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
@@ -228,6 +228,42 @@ await test('fs tree lists workspace files', async () => {
   const { body } = await api('/api/fs/ls?path=/home/student/workspace&tree=1&depth=2');
   assert.ok(Array.isArray(body.entries));
   assert.ok(body.entries.some((e) => e.name === 'hello.c'));
+  for (const entry of body.entries) {
+    const blob = `${entry.path || ''} ${entry.relative || ''} ${entry.name || ''}`;
+    assert.ok(!blob.includes('.mlab-saves'), `file-tree leaked save path: ${blob}`);
+    assert.ok(!blob.includes('sha256-'), `file-tree leaked digest: ${blob}`);
+  }
+});
+
+await test('container mkdir shows up in file-tree listing', async () => {
+  const container = process.env.CONTAINER_NAME || 'multilab-session';
+  const probe = `__mlab_tree_${Date.now()}`;
+  await apiJson('/api/steps/load', { tutorial: 'hello-c', step: '01-first-program' });
+  const created = spawnSync('docker', ['exec', '-u', 'student', container, 'mkdir', '-p', `/home/student/workspace/${probe}`], { encoding: 'utf8' });
+  assert.equal(created.status, 0, created.stderr || created.stdout);
+  let found = false;
+  for (let i = 0; i < 8; i++) {
+    await new Promise(resolve => setTimeout(resolve, 400));
+    const { body } = await api('/api/fs/ls?path=/home/student/workspace&tree=1&depth=2');
+    found = (body.entries || []).some((e) => e.name === probe || e.relative === probe);
+    if (found) break;
+  }
+  spawnSync('docker', ['exec', '-u', 'student', container, 'rmdir', `/home/student/workspace/${probe}`]);
+  assert.ok(found, `mkdir ${probe} did not appear in /api/fs/ls within 3.2s`);
+});
+
+await test('learner-visible cwd does not print the save digest path', async () => {
+  const container = process.env.CONTAINER_NAME || 'multilab-session';
+  await apiJson('/api/steps/load', { tutorial: 'hello-c', step: '01-first-program' });
+  const probe = spawnSync('docker', [
+    'exec', '-u', 'student', '-w', '/home/student/workspace', container,
+    'bash', '--login', '-ic', 'printf %s "$PWD"',
+  ], { encoding: 'utf8' });
+  assert.equal(probe.status, 0, probe.stderr || probe.stdout);
+  const pwd = (probe.stdout || '').trim();
+  assert.ok(pwd, 'login shell PWD was empty');
+  assert.ok(!pwd.includes('.mlab-saves'), `PWD leaked save tree: ${pwd}`);
+  assert.ok(!pwd.includes('sha256-'), `PWD leaked digest: ${pwd}`);
 });
 
 // --- F. untrusted policy still allows hello-c ---

@@ -20,7 +20,7 @@ export async function runCode() {
   }
   if (!state.currentTutorial) return;
   try {
-    await saveCurrentStep({ silent: true });
+    await saveCurrentStep({ silent: true, force: true });
   } catch (e) {
     handleError(e, {
       feature: 'commands',
@@ -48,7 +48,7 @@ export async function runTest() {
   const command = stepCommand(step, 'test');
   if (!state.currentTutorial || !command) return;
   try {
-    await saveCurrentStep({ silent: true });
+    await saveCurrentStep({ silent: true, force: true });
     const res = await apiJson('/api/commands/run', {
       tutorial: currentTutorialKey(),
       step: step.id,
@@ -78,7 +78,7 @@ export async function runPreview() {
   const command = stepCommand(step, 'preview');
   if (!state.currentTutorial || !command) return;
   try {
-    await saveCurrentStep({ silent: true });
+    await saveCurrentStep({ silent: true, force: true });
     if (command.terminal === 'interactive') {
       if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
         toast(t('commands.wsDisconnected'), true);

@@ -7,8 +7,10 @@ import {
   normalizePublishPorts,
   portMapFromInspect,
 } from '../services/PreviewPortMap.js';
-import { chooseDockerWorkspaceStrategy } from '../workspace/WorkspaceStrategy.js';
+import { chooseDockerWorkspaceStrategy, SAVES_BIND_TARGET } from '../workspace/WorkspaceStrategy.js';
 import { ensureHostWorkspaceDir } from '../workspace/HostWorkspace.js';
+import { validateWorkspaceRelPath } from '../services/PackageService.js';
+import { learnerShellEnv, learnerProfileSnippet } from './learnerShellEnv.js';
 
 export class DockerRuntimeProvider extends RuntimeProvider {
   constructor({
@@ -16,6 +18,7 @@ export class DockerRuntimeProvider extends RuntimeProvider {
     containerName,
     workspaceDir = '/home/student/workspace',
     hostWorkspaceDir = null,
+    hostSavesDir = null,
     workspaceStrategyMode = process.env.WORKSPACE_STRATEGY || 'auto',
     docker = new Docker(),
   }) {
@@ -24,7 +27,7 @@ export class DockerRuntimeProvider extends RuntimeProvider {
     this.image = image;
     this.containerName = containerName;
     this.workspaceDir = workspaceDir;
-    this.hostWorkspaceDir = hostWorkspaceDir;
+    this.hostSavesDir = hostSavesDir || hostWorkspaceDir;
     this.workspaceStrategyMode = workspaceStrategyMode;
     this.networkMode = 'none';
     this.sandboxPreset = 'standard';
@@ -65,6 +68,7 @@ export class DockerRuntimeProvider extends RuntimeProvider {
         sandboxPreset,
         publishPorts.join(','),
         workspaceStrategy.kind,
+        workspaceStrategy.bindTarget || workspaceStrategy.location,
         workspaceStrategy.hostPath || '-',
       ].join('|'),
     };
@@ -74,7 +78,8 @@ export class DockerRuntimeProvider extends RuntimeProvider {
     const location = kernel?.workspace || this.workspaceDir || '/home/student/workspace';
     return chooseDockerWorkspaceStrategy({
       location,
-      hostPath: this.hostWorkspaceDir,
+      hostPath: this.hostSavesDir,
+      bindTarget: SAVES_BIND_TARGET,
       mode: this.workspaceStrategyMode,
     });
   }
@@ -153,11 +158,92 @@ export class DockerRuntimeSession extends RuntimeSession {
     if (hostPath) {
       await ensureHostWorkspaceDir(hostPath);
     }
-    await this.exec(['mkdir', '-p', this.workspaceDir], { user: 'root', cwd: '/' });
+    await this.#alignStudentUid();
+    await this.exec(['mkdir', '-p', this.workspaceDir, SAVES_BIND_TARGET], { user: 'root', cwd: '/' });
     if (!hostPath) {
       await this.exec(['chown', '-R', 'student:student', this.workspaceDir], { user: 'root', cwd: '/' });
     }
+    await this.#installLearnerShellHook();
     this.workspaceReady = true;
+  }
+
+  async pointWorkspace(containerPath) {
+    await this.ensure();
+    const target = String(containerPath || '');
+    if (!target.startsWith(`${SAVES_BIND_TARGET}/`) && target !== SAVES_BIND_TARGET) {
+      throw Object.assign(new Error('workspace target escapes save bind'), { statusCode: 403 });
+    }
+    const quotedTarget = shQuote(target);
+    const quotedWs = shQuote(this.workspaceDir);
+    const script = `
+set -e
+mkdir -p ${shQuote(SAVES_BIND_TARGET)} "$(dirname ${quotedTarget})" ${quotedTarget}
+# Never rm -rf the workspace: it may already be a bind of the save dir.
+if [ -L ${quotedWs} ]; then rm -f ${quotedWs}; fi
+mkdir -p ${quotedWs}
+if mountpoint -q ${quotedWs} 2>/dev/null; then
+  umount ${quotedWs} 2>/dev/null || umount -l ${quotedWs} 2>/dev/null || true
+fi
+if mount --bind ${quotedTarget} ${quotedWs} 2>/dev/null; then
+  exit 0
+fi
+# Fallback: symlink. Prompt env hides the physical .mlab-saves path.
+rmdir ${quotedWs} 2>/dev/null || true
+ln -sfn ${quotedTarget} ${quotedWs}
+`;
+    let result = await this.exec(['bash', '-lc', script], {
+      user: 'root',
+      cwd: '/',
+      privileged: true,
+    });
+    if (result.exitCode !== 0) {
+      result = await this.exec(['bash', '-lc', script], { user: 'root', cwd: '/' });
+    }
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr || 'failed to point workspace at save directory');
+    }
+  }
+
+  async #installLearnerShellHook() {
+    const snippet = learnerProfileSnippet();
+    const result = await this.exec(['bash', '-lc', `
+cat > /etc/profile.d/multilab-workspace.sh << 'EOF'
+${snippet}EOF
+chmod 644 /etc/profile.d/multilab-workspace.sh
+`], { user: 'root', cwd: '/' });
+    if (result.exitCode !== 0) {
+      console.warn(`[docker] learner shell hook not installed: ${result.stderr || result.stdout}`);
+    }
+  }
+
+  async #alignStudentUid() {
+    if (typeof process.getuid !== 'function' || process.platform === 'win32') return;
+    const uid = process.getuid();
+    const gid = process.getgid();
+    if (!Number.isInteger(uid) || uid === 0) return;
+    const script = `
+set -e
+HOST_UID=${uid}
+HOST_GID=${gid}
+CURRENT=$(id -u student 2>/dev/null || echo '')
+if [ "$CURRENT" = "$HOST_UID" ]; then exit 0; fi
+if getent passwd "$HOST_UID" >/dev/null; then
+  OCC=$(getent passwd "$HOST_UID" | cut -d: -f1)
+  if [ "$OCC" != "student" ]; then
+    usermod -u $((HOST_UID + 20000)) "$OCC" 2>/dev/null || true
+  fi
+fi
+if getent group "$HOST_GID" >/dev/null; then
+  GOCC=$(getent group "$HOST_GID" | cut -d: -f1)
+  if [ "$GOCC" != "student" ]; then
+    groupmod -g $((HOST_GID + 20000)) "$GOCC" 2>/dev/null || true
+  fi
+fi
+groupmod -g "$HOST_GID" student 2>/dev/null || groupadd -g "$HOST_GID" student
+usermod -u "$HOST_UID" -g "$HOST_GID" student
+chown student:student /home/student 2>/dev/null || true
+`;
+    await this.exec(['bash', '-lc', script], { user: 'root', cwd: '/' });
   }
 
   async exec(cmdArray, opts = {}) {
@@ -173,6 +259,7 @@ export class DockerRuntimeSession extends RuntimeSession {
       AttachStderr: true,
       Tty: false,
       User: opts.user || 'student',
+      Privileged: Boolean(opts.privileged),
       WorkingDir: opts.cwd || this.workspaceDir,
       Env: envList,
     });
@@ -201,13 +288,19 @@ export class DockerRuntimeSession extends RuntimeSession {
     await this.ensureWorkspace();
     const lines = ['set -e'];
     if (opts.clear !== false) {
-      lines.push(`find ${shQuote(this.workspaceDir)} -mindepth 1 -maxdepth 1 -exec rm -rf {} +`);
+      lines.push(`find -H ${shQuote(this.workspaceDir)} -mindepth 1 -maxdepth 1 -exec rm -rf {} +`);
     }
     for (const f of files || []) {
-      const name = validateFileName(f.name || 'untitled');
-      const dest = pathJoinPosix(this.workspaceDir, name);
+      const rel = validateWorkspaceRelPath(f.name || 'untitled');
+      const dest = pathJoinPosix(this.workspaceDir, rel);
+      if (f.type === 'dir') {
+        lines.push(`mkdir -p ${shQuote(dest)}`);
+        continue;
+      }
+      const parent = dest.includes('/') ? dest.slice(0, dest.lastIndexOf('/')) : this.workspaceDir;
+      lines.push(`mkdir -p ${shQuote(parent)}`);
       const encoded = Buffer.from(f.content || '', 'utf8').toString('base64');
-      const heredoc = `EOF_${encoded.length}_${name.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      const heredoc = `EOF_${encoded.length}_${rel.replace(/[^a-zA-Z0-9]/g, '_')}`;
       lines.push(`base64 -d > ${shQuote(dest)} <<'${heredoc}'`);
       lines.push(encoded);
       lines.push(heredoc);
@@ -221,20 +314,27 @@ export class DockerRuntimeSession extends RuntimeSession {
     const script = `
 set -e
 cd ${this.workspaceDir}
-find . -maxdepth 1 -type f -printf '%f\\n' | sort | while IFS= read -r name; do
-  printf '%s\\t' "$(printf '%s' "$name" | base64 -w0)"
-  base64 -w0 "$name"
-  printf '\\n'
+find . -mindepth 1 -maxdepth 8 \\( -type f -o -type d \\) -printf '%y\\t%P\\n' | sort | while IFS=$'\\t' read -r kind rel; do
+  [ -z "$rel" ] && continue
+  encoded="$(printf '%s' "$rel" | base64 -w0)"
+  if [ "$kind" = "d" ]; then
+    printf 'd\\t%s\\n' "$encoded"
+  else
+    printf 'f\\t%s\\t' "$encoded"
+    base64 -w0 "$rel"
+    printf '\\n'
+  fi
 done
 `;
     const r = await this.exec(['bash', '-lc', script], { cwd: '/' });
     if (r.exitCode !== 0) throw new Error(r.stderr || 'workspace listing failed');
     return r.stdout.trim().split('\n').filter(Boolean).map(line => {
-      const [encodedName, encodedContent] = line.split('\t');
-      const name = Buffer.from(encodedName, 'base64').toString('utf8');
-      validateFileName(name);
+      const [kind, encodedName, encodedContent] = line.split('\t');
+      const name = validateWorkspaceRelPath(Buffer.from(encodedName, 'base64').toString('utf8'));
+      if (kind === 'd') return { name, type: 'dir' };
       return {
         name,
+        type: 'file',
         content: Buffer.from(encodedContent || '', 'base64').toString('utf8'),
       };
     });
@@ -262,7 +362,7 @@ done
   async exportWorkspaceArchive() {
     const container = await this.ensure();
     const exec = await container.exec({
-      Cmd: ['tar', '-czf', '-', '-C', '/home/student', 'workspace'],
+      Cmd: ['tar', '-czf', '-', '-C', '/home/student/workspace', '.'],
       AttachStdin: false,
       AttachStdout: true,
       AttachStderr: true,
@@ -304,12 +404,7 @@ done
       Tty: true,
       User: 'student',
       WorkingDir: this.workspaceDir,
-      Env: [
-        'PS1=\\[\\e[01;32m\\]\\u@\\h\\[\\e[00m\\]:\\[\\e[01;34m\\]\\w\\[\\e[00m\\]$ ',
-        'TERM=xterm-256color',
-        'LANG=C.UTF-8',
-        'LC_ALL=C.UTF-8',
-      ],
+      Env: learnerShellEnv(),
     });
     const shellStream = await shellExec.start({ hijack: true, stdin: true });
     const stdoutPipe = new PassThrough();
@@ -372,6 +467,7 @@ done
       publishPorts,
       workspaceKind: workspaceStrategy.kind,
       workspaceHost: workspaceStrategy.hostPath,
+      workspaceBind: workspaceStrategy.bindTarget || null,
     });
 
     const containers = await this.docker.listContainers({ all: true });
@@ -423,7 +519,7 @@ done
     }
     if (workspaceStrategy.hostPath) {
       hostConfig.Mounts = [{
-        Target: this.workspaceDir,
+        Target: workspaceStrategy.bindTarget || this.workspaceDir,
         Source: workspaceStrategy.hostPath,
         Type: 'bind',
         ReadOnly: false,
@@ -493,13 +589,6 @@ function pathJoinPosix(...parts) {
   return parts.join('/').replace(/\/+/g, '/');
 }
 
-function validateFileName(name) {
-  if (!name || name.includes('/') || name.includes('\\') || name.includes('..')) {
-    throw Object.assign(new Error('Invalid file name'), { statusCode: 400 });
-  }
-  return name;
-}
-
 function pickSandboxPreset(kernel) {
   const presets = Array.isArray(kernel.sandbox_presets) ? kernel.sandbox_presets : [];
   if (presets.includes('standard')) return 'standard';
@@ -516,6 +605,7 @@ function desiredContainerLabels({
   publishPorts = [],
   workspaceKind = 'runtime-internal',
   workspaceHost = null,
+  workspaceBind = null,
 }) {
   return {
     'multilab.kernel.id': String(kernelId || ''),
@@ -524,6 +614,7 @@ function desiredContainerLabels({
     'multilab.sandbox': String(sandboxPreset || ''),
     'multilab.publish': normalizePublishPorts(publishPorts).join(',') || '-',
     'multilab.workspace.kind': String(workspaceKind || 'runtime-internal'),
+    'multilab.workspace.bind': String(workspaceBind || '-'),
     'multilab.workspace.host': workspaceHost
       ? crypto.createHash('sha256').update(String(workspaceHost)).digest('hex').slice(0, 12)
       : '-',
