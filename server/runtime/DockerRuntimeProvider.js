@@ -526,11 +526,19 @@ done
       const container = this.docker.getContainer(existing.Id);
       const inspect = await container.inspect();
       const labels = inspect.Config?.Labels || {};
-      if (labelsMatch(labels, desired)) {
-        if (existing.State !== 'running') {
-          console.log(`[docker] 启动已存在的容器 ${this.containerName}`);
+      let reuse = labelsMatch(labels, desired);
+      if (reuse && existing.State !== 'running') {
+        console.log(`[docker] 启动已存在的容器 ${this.containerName}`);
+        try {
           await container.start();
-        } else {
+        } catch (err) {
+          // WSL/Docker Desktop restart often invalidates the previous bind-mount proxy path.
+          console.log(`[docker] 已有容器无法启动，重建: ${err.message}`);
+          reuse = false;
+        }
+      }
+      if (reuse) {
+        if (existing.State === 'running') {
           console.log(`[docker] 容器 ${this.containerName} 已在运行 (kernel=${this.kernelId || 'default'})`);
         }
         this.portMap = portMapFromInspect(inspect);
@@ -539,7 +547,7 @@ done
       }
 
       console.log(
-        `[docker] 容器 ${this.containerName} 策略不匹配，按 kernel 重建 ` +
+        `[docker] 容器 ${this.containerName} 将按 kernel 重建 ` +
         `(network=${this.networkMode}, sandbox=${this.sandboxPreset}, ` +
         `workspace=${workspaceStrategy.kind}, ports=${publishPorts.join(',') || '-'})`
       );

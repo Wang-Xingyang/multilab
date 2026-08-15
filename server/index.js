@@ -651,7 +651,9 @@ runtimeManager.ensureDefaultSession()
   .catch(e => {
     console.error('\n❌ 启动失败:\n');
     console.error(e.message);
-    console.error('\n请先构建执行镜像:');
-    console.error(`  docker build -t ${EXEC_IMAGE} -f docker/os.Dockerfile docker/\n`);
+    if (/未构建|No such image|not found/i.test(e.message || '')) {
+      console.error('\n请先构建执行镜像:');
+      console.error(`  docker build -t ${EXEC_IMAGE} -f docker/os.Dockerfile docker/\n`);
+    }
     process.exit(1);
   });
