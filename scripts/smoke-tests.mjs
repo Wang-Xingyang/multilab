@@ -39,7 +39,6 @@ import {
 } from '../server/workspace/HostWorkspace.js';
 import { RuntimeProvider, RuntimeSession } from '../server/runtime/RuntimeProvider.js';
 import { RuntimeManager } from '../server/runtime/RuntimeManager.js';
-import { WslRuntimeProvider } from '../server/runtime/WslRuntimeProvider.js';
 import {
   capturedTimeoutMs,
   describeProbe,
@@ -215,26 +214,11 @@ await test('KernelRegistry preferred kernel selection', () => {
   const missing = registry.resolveForPackage(pkg, { preferredKernelId: 'nope' });
   assert.equal(missing.preferred_applied, false);
   assert.equal(missing.selected.id, 'gcc-ubuntu24-docker');
-  const wsl = registry.listKernels().find(kernel => kernel.id === 'wsl-system-gcc');
-  assert.ok(wsl);
-  assert.equal(wsl.implemented, false);
+  const ids = registry.listKernels().map(kernel => kernel.id).sort();
+  assert.deepEqual(ids, ['gcc-ubuntu24-docker', 'gcc-ubuntu24-docker-net']);
+  assert.ok(registry.listKernels().every(kernel => kernel.provider === 'docker'));
   const resolved = registry.resolveForPackage(pkg);
   assert.equal(resolved.selected.id, 'gcc-ubuntu24-docker');
-  assert.equal(resolved.candidates.find(c => c.id === 'wsl-system-gcc')?.compatible, false);
-});
-
-await test('WslRuntimeProvider is a 501 placeholder', async () => {
-  const provider = new WslRuntimeProvider({ hostSavesDir: '/tmp/saves' });
-  assert.equal(provider.kind, 'wsl');
-  assert.equal(provider.capabilities().implemented, false);
-  const probe = await provider.probe({ id: 'wsl-system-gcc' });
-  assert.equal(probe.ok, false);
-  assert.equal(probe.implemented, false);
-  assert.equal(probe.reason, 'provider_unimplemented');
-  await assert.rejects(
-    () => provider.startSession(),
-    (error) => error.code === 'provider_unimplemented' && error.statusCode === 501
-  );
 });
 
 await test('RuntimeSession.tempScriptPath lives on the session', () => {

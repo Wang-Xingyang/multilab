@@ -28,9 +28,9 @@ import { parseFindTreeOutput, sortWorkspaceTreeEntries } from '../workspace/Work
  * command execution.
  *
  * Physical placement is described by a WorkspaceStrategy chosen by the
- * runtime provider. Docker on Linux/WSL ext4 bind-mounts a host directory
- * and this service reads/writes that path directly. Other platforms keep
- * the runtime-internal copy/sync fallback through RuntimeSession.
+ * runtime provider. Linux ext4 bind-mounts the host save tree and this
+ * service reads/writes that path directly. Windows copies the current
+ * step through RuntimeSession.
  */
 export class WorkspaceService {
   #watchers = [];
@@ -88,9 +88,9 @@ export class WorkspaceService {
 
   /**
    * Make this step's save directory the live workspace.
-   * Bind-mount/host-local: host IO uses that directory; Docker points
-   * /home/student/workspace at the bind-mounted save path.
-   * runtime-internal: copy files into the session workspace.
+   * Bind-mount: host IO uses that directory; Docker retargets
+   * /home/student/workspace at the already-mounted save path.
+   * Copy (Windows): write only this step's files into the session workspace.
    */
   async useSaveWorkspace({
     hostPath,

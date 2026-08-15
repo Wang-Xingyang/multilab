@@ -2,13 +2,14 @@
  * Workspace placement is logically owned by MultiLab, but the physical
  * location and IO strategy are chosen by the runtime provider.
  *
- * Docker on Linux/WSL ext4 uses bind-mount. Docker Desktop Windows/macOS
- * and Windows-drive mounts (/mnt/c) stay on runtime-internal copy/sync.
- * That fallback is not the target architecture.
+ * Official lab machine is a Docker container. The player (Windows/Linux Node)
+ * owns host save as durable truth and syncs only the current step into the
+ * container workspace:
+ *   bind-mount — Linux ext4 (and WSL ext4): host save tree is the live disk
+ *   copy       — Windows NTFS / /mnt/c: RuntimeSession writeFiles/readFiles
  *
- * Later strategies:
- *   volume-sync  — Docker Desktop Windows/macOS volume or copy/sync
- *   host-local   — trusted-only local provider on the host filesystem
+ * Do not bind-mount /mnt/c. Do not use the student's own WSL distro as a lab.
+ * host-local remains an unused strategy kind, not a product path.
  */
 
 import { execFileSync } from 'child_process';

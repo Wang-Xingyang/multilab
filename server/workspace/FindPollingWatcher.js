@@ -1,10 +1,9 @@
 /**
  * Fallback workspace watcher: poll `find` through RuntimeSession.exec.
  *
- * This is the current Docker/WSL/SSH path because those environments ship
- * coreutils and do not require a MultiLab-specific in-kernel agent.
- * Providers with native watch (host fs.watch, inotify, sync events) should
- * override RuntimeSession.watchFilesystem instead of using this helper.
+ * This is the copy-strategy watch path (Windows, or Linux when not bind-mounted).
+ * Bind-mount Linux uses host `fs.watch` plus this poll as a safety net.
+ * Does not require a MultiLab-specific in-kernel agent.
  *
  * onChange() fires when the set of file/dir paths changes. Content edits to
  * an existing file do not fire — the file tree reflects structure, not bytes.

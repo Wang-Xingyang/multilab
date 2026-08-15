@@ -95,25 +95,6 @@ export function createDefaultKernelRegistry({ image, workspaceDir }) {
         // Host binds these container ports to 127.0.0.1 ephemeral ports.
         publish_ports: [8080, 3000, 5173, 8000],
       },
-      {
-        id: 'wsl-system-gcc',
-        display_name: 'WSL System GCC (placeholder)',
-        provider: 'wsl',
-        platform: 'linux',
-        workspace: workspaceDir,
-        user: process.env.USER || 'student',
-        implemented: false,
-        trusted_only: true,
-        capabilities: ['tty', 'compile', 'debug', 'signals'],
-        commands: {
-          gcc: '13.3.0',
-          gdb: '15.0.0',
-          bash: '5.2.0',
-          make: '4.3.0',
-        },
-        sandbox_presets: ['none'],
-        network_default: 'none',
-      },
     ],
   });
 }

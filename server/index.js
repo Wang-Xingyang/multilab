@@ -3,7 +3,7 @@
 //   1. 静态服务前端 (public/)
 //   2. 提供 /api/tutorials 列表 + 详情
 //   3. 通过 WebSocket 把终端接到 RuntimeSession.attachTerminal
-//      （当前实现是 Docker exec TTY，后续可换 WSL/local）
+//      （实验机是 Docker exec TTY；播放器是 Windows/Linux 上的 Node）
 
 import 'dotenv/config';
 import express from 'express';
@@ -13,7 +13,6 @@ import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { DockerRuntimeProvider } from './runtime/DockerRuntimeProvider.js';
-import { WslRuntimeProvider } from './runtime/WslRuntimeProvider.js';
 import { RuntimeManager } from './runtime/RuntimeManager.js';
 import { PackageService } from './services/PackageService.js';
 import { SaveService } from './services/SaveService.js';
@@ -57,10 +56,6 @@ const dockerRuntimeProvider = new DockerRuntimeProvider({
   workspaceDir: WORKSPACE_DIR,
   hostSavesDir: HOST_SAVES_DIR,
 });
-const wslRuntimeProvider = new WslRuntimeProvider({
-  workspaceDir: WORKSPACE_DIR,
-  hostSavesDir: HOST_SAVES_DIR,
-});
 const archiveService = new MlabArchiveService();
 const packageLibrary = new PackageLibrary({
   libraryDir: PACKAGE_LIBRARY_DIR,
@@ -76,7 +71,7 @@ const kernelRegistry = createDefaultKernelRegistry({
 });
 const kernelSelectionStore = new KernelSelectionStore({ runtimeStateDir: RUNTIME_STATE_DIR });
 const runtimeManager = new RuntimeManager({
-  providers: { docker: dockerRuntimeProvider, wsl: wslRuntimeProvider },
+  providers: { docker: dockerRuntimeProvider },
   kernelRegistry,
   packageService,
   kernelSelectionStore,

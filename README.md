@@ -10,14 +10,14 @@ This repository is an early prototype of the MultiLab host:
 
 - frontend: `public/index.html` shell plus no-bundler ES modules under `public/js/` (shared `state` / `messages`, feature modules, Monaco + xterm.js);
 - backend: Node ESM services behind `server/index.js` (Express + WebSocket);
-- runtime: `docker/os.Dockerfile` behind a `RuntimeProvider` abstraction;
+- runtime: Docker container lab behind `RuntimeProvider` (no student-WSL kernel);
 - package format: `multilab.json` directories and `.mlab` ZIP packages;
 - package sources: development directories under `TUTORIALS_DIR` and imported packages under `.multilab-state/packages/`;
 - command model: manifest-declared `commands[]` with script files;
 - security: digest-keyed trust store (default `untrusted`) and command-time security policy gates;
-- kernels/runtime: static `KernelRegistry` with offline `gcc-ubuntu24-docker` and networked `gcc-ubuntu24-docker-net` (localhost port publish); `RuntimeManager` binds the selected kernel to a provider and applies Docker network/sandbox/port settings; UI can pick a compatible kernel and reconnect the terminal;
-- saves: versioned step files plus `save.json` progress metadata under `.multilab-state/saves/`;
-- workspace: `WorkspaceService` owns the learner workspace (the current step save dir); Docker bind-mounts `.multilab-state/saves` on Linux/WSL ext4 and falls back to runtime-internal copy/sync elsewhere;
+- kernels/runtime: static `KernelRegistry` with offline `gcc-ubuntu24-docker` and networked `gcc-ubuntu24-docker-net` (localhost port publish); `RuntimeManager` binds the selected kernel to Docker and applies network/sandbox/port settings; UI can pick a compatible kernel and reconnect the terminal;
+- saves: versioned step files plus `save.json` progress metadata under `.multilab-state/saves/` (host save is durable truth for all steps);
+- workspace: `WorkspaceService` syncs **only the current step** into the lab; Linux ext4 bind-mounts the host save tree and retargets `/home/student/workspace`; Windows copies that step through the session;
 - panels: manifest `default_panels` drive tutorial/terminal/file-tree visibility; test-results/web-preview/logs/diagnostics open as editor tabs next to files; progress strip uses `save.json`; trust changes go through a confirmation dialog;
 - checks: `npm run test:smoke` runs a Docker-free service smoke suite.
 
@@ -89,7 +89,7 @@ npm install
 cp .env.example .env
 ```
 
-The default `.env` points `TUTORIALS_DIR` at `../../tutorials` and stores runtime state under `../.multilab-state`. `WORKSPACE_STRATEGY=auto` bind-mounts the live workspace on Linux/WSL ext4.
+The default `.env` points `TUTORIALS_DIR` at `../../tutorials` and stores runtime state under `../.multilab-state`. `WORKSPACE_STRATEGY=auto` bind-mounts the live workspace on Linux ext4 and copies the current step on Windows.
 
 Start the server:
 
@@ -206,6 +206,6 @@ python3 docs/tutorial-skill/scripts/unpack_mlab.py /tmp/hello-c.mlab -o /tmp/hel
 - Do not add new `tutorial.json` support.
 - Do not reintroduce `run_cmd`, `has_run`, `has_test`, `/api/test`, or WebSocket `type: "run"`.
 - New execution should go through manifest `commands[]`.
-- Docker is the first official runtime provider, not the permanent architecture boundary.
+- Docker is the official lab machine. The player ships as Windows and Linux Node apps. Do not add a student-WSL kernel.
 - Keep trust defaulting to untrusted and network defaulting to denied unless a package explicitly requires it.
 - Prefer service boundaries: PackageService, PackageLibrary, SaveService, WorkspaceService, CommandService, SecurityPolicyService, TrustStore, KernelRegistry.
