@@ -28,7 +28,7 @@ Browser UI
   Monaco editor
   xterm.js terminal
   tutorial Markdown
-  dynamic aux panels (test-results / web-preview)
+  editor-group tabs (files + preview / test-results / logs / diagnostics)
 
 Node host
   Express APIs
@@ -213,12 +213,12 @@ The old `/api/test` and WebSocket `type: "run"` paths have been removed.
 Current UI behavior:
 
 - `tutorial` / `terminal` visibility follows the normalized panel list;
-- `test-results` opens a right-hand aux panel when a captured test/check runs (even if the panel starts `hidden`);
-- `web-preview` opens the same aux area for `type: "preview"` commands;
+- `test-results` / `web-preview` / `logs` / `diagnostics` open as editor-group tabs next to file tabs (even if the panel starts `hidden`). Split editor groups (preview beside code) are not implemented yet. Logs and diagnostics are also always available from the right activity rail, without requiring a tutorial panel declaration;
+- `web-preview` opens that tab for `type: "preview"` commands;
 - captured preview output may include `MULTILAB_PREVIEW_HTML` or HTML body for sandboxed `iframe.srcdoc` rendering;
 - `MULTILAB_PREVIEW_URL=...` is rewritten to a host-local mapped URL when the active Docker kernel publishes that container port (`publish_ports`, bound to `127.0.0.1`); otherwise it remains text with guidance to use `gcc-ubuntu24-docker-net` and `security.network_required` / `security.preview_ports`.
 - Packages that need network or preview ports resolve to `gcc-ubuntu24-docker-net` (bridge + sandbox + published ports). Offline packages still require `network_default: none`.
-- `file-tree` panels render a center-left tree from `GET /api/fs/ls?tree=1` (workspace-scoped). The tree auto-refreshes in real time: `WorkspaceService.watch` uses the current strategy's watcher and pushes `type: "fs_change"` over `/ws`; the frontend re-fetches `GET /api/fs/ls` on receipt. Bind-mount workspaces watch the host directory; `runtime-internal` keeps the find-polling fallback (~1s via `RuntimeSession.exec`). No MultiLab-specific kernel agent is required.
+- `file-tree` panels render a center-right tree from `GET /api/fs/ls?tree=1` (workspace-scoped). A right activity rail holds the explorer / logs / diagnostics icons; the tree opens to the left of that rail so the click target does not move. There is no FILES header. The tree auto-refreshes in real time: `WorkspaceService.watch` uses the current strategy's watcher and pushes `type: "fs_change"` over `/ws`; the frontend re-fetches `GET /api/fs/ls` on receipt. Bind-mount workspaces watch the host directory; `runtime-internal` keeps the find-polling fallback (~1s via `RuntimeSession.exec`). No MultiLab-specific kernel agent is required.
 
 ## Terminal Model
 
@@ -414,5 +414,5 @@ The UI shows a kernel selector for compatible candidates and a "重连终端" bu
 - Kernel registry is static (default Docker kernels plus the WSL placeholder).
 - Runtime selection follows resolved kernel plus optional per-package user preference.
 - Package library management covers list/detail/open/delete; bulk cleanup and save-linked cleanup are not implemented.
-- Panel declarations drive tutorial/terminal/file-tree visibility and a right-hand aux panel for `test-results` / `web-preview` / `logs` / `diagnostics`. Progress UI reads `save.json` metadata from step APIs. Trust changes use a confirmation dialog. Frontend logic lives in `public/js/` ES modules without a bundler: shared `state.js` / `messages.js` (`t('group.key')`) plus feature modules (`tutorial`, `files`, `commands`, `panels`, `terminal`, …). Background long-running preview processes remain open; further live-web work is deprioritized in favor of HTML preview.
+- Panel declarations drive tutorial/terminal/file-tree visibility. `test-results` / `web-preview` open as editor tabs when declared. Logs and diagnostics are always on the right activity rail. The file-tree sits on the right of that rail with no FILES header. Learner-visible copy lives in `public/js/messages.js` (`t('group.key')`); static HTML uses `data-i18n*` filled by `applyStaticCopy()`. Progress UI reads `save.json` metadata from step APIs. Trust changes use a confirmation dialog. Frontend logic lives in `public/js/` ES modules without a bundler. Background long-running preview processes remain open; further live-web work is deprioritized in favor of HTML preview. There is no Settings view yet.
 - The Docker container is single-session and intended for local single-user use.

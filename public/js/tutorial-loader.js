@@ -51,7 +51,7 @@ export async function loadTutorialList(opts = {}) {
         `<div class="tutorial-placeholder">
           <div class="ph-title">${t('tutorial.emptyTitle')}</div>
           <div class="ph-sub">${t('tutorial.emptySub')}</div>
-          <div class="ph-sub" style="margin-top:4px"><code>${escapeAttr(expectedDir || '(未知)')}</code></div>
+          <div class="ph-sub" style="margin-top:4px"><code>${escapeAttr(expectedDir || t('tutorial.unknownDir'))}</code></div>
           <div class="ph-hint">
             <div style="margin-bottom:6px">${t('tutorial.emptyCheckTitle')}</div>
             <ol style="margin:0;padding-left:18px;line-height:1.8"><li>${t('tutorial.emptyCheck1')}</li><li>${t('tutorial.emptyCheck2')}</li></ol>
@@ -94,7 +94,6 @@ export async function loadTutorial(id) {
     state.currentTutorial = await apiGet(`/api/tutorials/${encodeURIComponent(id)}`);
     if (!state.currentTutorial || !state.currentTutorial.steps?.length) throw new Error(t('tutorial.invalidData'));
     state.currentProgress = normalizeProgress(state.currentTutorial.progress || null);
-    state.auxVisible = false;
     applyPanelLayout();
     renderTrustButton();
     await refreshKernelResolution();

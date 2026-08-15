@@ -89,7 +89,7 @@
 
     --header-h: 48px;
     --step-bar-h: 38px;
-    --tab-h: 34px;
+    --tab-h: 30px;
     --font-mono: "JetBrains Mono","Consolas","SF Mono",monospace;
     --font-ui: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   }
@@ -149,7 +149,7 @@
   /* ============================================================
      顶栏: 三段式分组 + 主次
      左: brand + 教程 + 包管理
-     中: runtime (kernel + 重连 + trust 徽章) + 日志/诊断
+     中: runtime (kernel + 重连 + trust 徽章)
      右: 编辑操作 ‖ 主操作(run/test/preview) ‖ 主题/export
      ============================================================ */
   header {
@@ -314,105 +314,96 @@
   .workspace-main { flex: 1; display: flex; min-height: 0; min-width: 0; }
   .editor-column { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 
-  /* center-left: file-tree */
+  /* center-right: file-tree (opens left of a fixed right-edge toggle) */
   .file-tree-panel {
     width: 200px; flex-shrink: 0; display: none; flex-direction: column;
     background: var(--surface-1); min-width: 140px; max-width: 360px;
   }
   .file-tree-panel.visible:not(.collapsed) { display: flex; }
-  .file-tree-head {
-    height: var(--tab-h); display: flex; align-items: center; justify-content: space-between;
-    padding: 0 4px 0 12px; border-bottom: 1px solid var(--border);
-    font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600;
-  }
-  .file-tree-head .tree-title { display: inline-flex; align-items: center; gap: 6px; }
-  .file-tree-head .tree-title svg { color: var(--text-faint); }
-  .file-tree-head .tree-actions { display: inline-flex; align-items: center; gap: 2px; }
-  .file-tree-head button {
-    background: none; border: 1px solid transparent; color: var(--text-dim);
-    border-radius: var(--radius-xs); font-size: 11px; padding: 2px 7px;
-    display: inline-flex; align-items: center; gap: 3px;
-    transition: all var(--dur-fast) var(--ease);
-  }
-  .file-tree-head button:hover { color: var(--text); background: var(--surface-2); }
-  .file-tree-body { flex: 1; overflow: auto; padding: 4px 0; font-size: 12.5px; }
+  .file-tree-body { flex: 1; overflow: auto; padding: 4px 0; font-size: 12px; }
   .file-tree-item {
-    display: flex; align-items: center; gap: 6px;
-    padding: 3px 8px 3px calc(10px + var(--depth, 0) * 12px);
-    cursor: pointer; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    display: flex; align-items: center; gap: 4px;
+    padding: 1px 8px 1px calc(4px + var(--depth, 0) * 12px);
+    min-height: 22px;
+    cursor: pointer; color: var(--text-dim); white-space: nowrap; overflow: hidden;
     transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
   }
+  .file-tree-item .file-tree-name { overflow: hidden; text-overflow: ellipsis; }
+  .file-tree-item .tab-icon { width: 13px; height: 13px; flex-shrink: 0; }
   .file-tree-item:hover { background: var(--surface-2); color: var(--text); }
   .file-tree-item.active { color: var(--text); background: var(--accent-soft); }
   .file-tree-item.dir { color: var(--text); cursor: pointer; font-weight: 500; }
   .file-tree-empty { padding: 16px 12px; color: var(--text-faint); font-size: 12px; text-align: center; }
 
+  .activity-rail {
+    width: 32px; flex-shrink: 0; display: flex; flex-direction: column;
+    align-items: stretch; padding: 2px 0; gap: 2px;
+    background: var(--surface-1); border-left: 1px solid var(--border);
+  }
+  .activity-rail .rail-btn {
+    height: var(--tab-h); width: 100%; padding: 0;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    color: var(--text-dim); background: none; border: none;
+    transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+  }
+  .activity-rail .rail-btn:hover { color: var(--text); background: var(--surface-2); }
+  .activity-rail .rail-btn.is-open { color: var(--accent); background: var(--accent-soft); }
+
   /* 文件 Tab 栏 */
   .file-tabs {
     height: var(--tab-h); display: flex; align-items: stretch; background: var(--surface-1);
-    border-bottom: 1px solid var(--border); padding: 0 4px; gap: 0; overflow-x: auto;
+    border-bottom: 1px solid var(--border); padding: 0 2px; gap: 0; overflow-x: auto;
     scrollbar-width: none;
   }
   .file-tabs::-webkit-scrollbar { display: none; }
   .file-tabs .tab {
-    padding: 0 10px; font-size: 12.5px; display: flex; align-items: center; gap: 6px;
+    padding: 0 8px; font-size: 12px; display: flex; align-items: center; gap: 5px;
     color: var(--text-dim); border-bottom: 2px solid transparent;
     cursor: pointer; white-space: nowrap; transition: all var(--dur-fast) var(--ease); flex-shrink: 0;
     border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   }
   .file-tabs .tab:hover { color: var(--text); background: var(--surface-2); }
   .file-tabs .tab.active { color: var(--text); border-bottom-color: var(--accent); background: var(--surface-2); }
+  .file-tabs .tab .tab-icon { width: 14px; height: 14px; flex-shrink: 0; }
+  .tab-icon-c, .tab-icon-h { color: #569cd6; }
+  .tab-icon-md { color: #c6793a; }
+  .tab-icon-py { color: #4ec9b0; }
+  .tab-icon-js { color: #dcdcaa; }
+  .tab-icon-ts { color: #569cd6; }
+  .tab-icon-sh { color: #4ec9b0; }
+  .tab-icon-json { color: #dcdcaa; }
+  .tab-icon-file { color: var(--text-faint); }
+  .tab-icon-folder { color: #dcb67a; }
+  .tab-icon-view { color: var(--accent); }
   .file-tabs .tab .tab-modified { color: var(--warn); font-size: 14px; line-height: 1; }
   .file-tabs .tab .tab-close {
-    margin-left: 2px; font-size: 14px; opacity: 0; color: var(--text-dim);
-    cursor: pointer; line-height: 1; padding: 0 2px; border-radius: var(--radius-xs);
-    transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+    margin-left: 2px; opacity: 0.45; color: var(--text-dim);
+    cursor: pointer; width: 16px; height: 16px; border-radius: var(--radius-xs);
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
   }
-  .file-tabs .tab:hover .tab-close { opacity: 0.6; }
+  .file-tabs .tab .tab-close svg { width: 12px; height: 12px; display: block; }
+  .file-tabs .tab:hover .tab-close, .file-tabs .tab.active .tab-close { opacity: 0.7; }
   .file-tabs .tab .tab-close:hover { opacity: 1; background: var(--surface-3); color: var(--error); }
-  .file-tabs .tab-show-tree {
-    padding: 0 8px; display: flex; align-items: center; cursor: pointer;
-    color: var(--text-dim); transition: all var(--dur-fast) var(--ease); flex-shrink: 0; border-radius: var(--radius-sm);
-    background: none; border: none;
-  }
-  .file-tabs .tab-show-tree:hover { color: var(--text); background: var(--surface-2); }
 
   .editor-wrap { flex: 1; border-bottom: none; position: relative; min-height: 0; }
   .editor-column .file-tabs { flex-shrink: 0; }
   #monaco { position: absolute; inset: 0; }
+  .editor-wrap.showing-view #monaco { display: none; }
+  .editor-wrap .editor-view {
+    display: none; position: absolute; inset: 0; overflow: auto;
+    padding: 14px; font-size: 12px; background: var(--bg);
+  }
+  .editor-wrap .editor-view.active {
+    display: flex; flex-direction: column; animation: pane-fade var(--dur) var(--ease);
+  }
+  .editor-wrap .editor-view .preview-frame {
+    flex: 1 1 auto; min-height: 0; height: auto;
+  }
   .terminal-wrap {
     flex: 1; background: var(--term-bg); padding: 6px 8px; overflow: hidden; position: relative;
   }
   #terminal { height: 100%; }
-
-  /* ============================================================
-     右侧辅助面板: test-results / web-preview / logs / diagnostics
-     ============================================================ */
-  .aux-panel {
-    width: 340px; flex-shrink: 0; display: none; flex-direction: column;
-    background: var(--surface-1); min-width: 240px;
-  }
-  .aux-panel.visible { display: flex; animation: pane-fade var(--dur-slow) var(--ease); }
-  .aux-tabs {
-    height: var(--tab-h); display: flex; align-items: stretch; border-bottom: 1px solid var(--border);
-    padding: 0 4px; gap: 0;
-  }
-  .aux-tabs button {
-    background: transparent; border: none; border-bottom: 2px solid transparent;
-    color: var(--text-dim); padding: 0 11px; font-size: 12px;
-    transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
-    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  }
-  .aux-tabs button:hover { color: var(--text); background: var(--surface-2); }
-  .aux-tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
-  .aux-tabs .aux-close {
-    margin-left: auto; color: var(--text-dim); padding: 0 10px; font-size: 16px;
-    border-radius: var(--radius-xs);
-  }
-  .aux-tabs .aux-close:hover { color: var(--text); background: var(--surface-3); }
-  .aux-body { flex: 1; overflow: auto; padding: 14px; font-size: 12px; }
-  .aux-pane { display: none; height: 100%; }
-  .aux-pane.active { display: block; animation: pane-fade var(--dur) var(--ease); }
 
   /* 统一 empty-state */
   .aux-empty {
@@ -706,9 +697,12 @@
   .menu-pop button svg { color: var(--text-faint); flex-shrink: 0; }
 
   /* file-tree 目录 chevron (svg, 不用文本符号) */
-  .file-tree-item.dir { padding-left: calc(10px + var(--depth, 0) * 12px); }
+  .file-tree-item.file::before {
+    content: ''; display: inline-block; width: 10px; height: 10px; margin-right: 0;
+    flex-shrink: 0;
+  }
   .file-tree-item.dir::before {
-    content: ''; display: inline-block; width: 10px; height: 10px; margin-right: 4px;
+    content: ''; display: inline-block; width: 10px; height: 10px; margin-right: 0;
     flex-shrink: 0; color: var(--text-faint);
     background: currentColor;
     -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><polyline points='6 9 12 15 18 9' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/></svg>") center / contain no-repeat;
@@ -724,7 +718,6 @@
     header { padding: 0 8px; gap: 4px; }
     header select { max-width: 150px; }
     .header-group + .header-group { padding-left: 6px; }
-    .aux-panel { width: 280px; min-width: 200px; }
     .tutorial-content { padding: 20px 18px; }
     .step-bar { padding: 0 8px; gap: 6px; }
   }
@@ -734,7 +727,6 @@
     .step-dot .label { display: none; }
     .library-dropdown { width: calc(100vw - 16px); }
     .picker-dropdown { width: calc(100vw - 16px); }
-    .aux-panel { position: absolute; right: 0; top: 0; bottom: 0; width: 86vw; z-index: var(--z-drag); box-shadow: var(--shadow-lg); }
   }
 </style>
 </head>
@@ -744,50 +736,42 @@
   <!-- 左: brand + 教程 + 包管理菜单 + 存档菜单 -->
   <div class="header-group">
     <div class="brand">Multi<span class="dot">·</span>Lab</div>
-    <button id="theme-btn" class="hdr-btn icon-only" title="切换主题">
+    <button id="theme-btn" class="hdr-btn icon-only" data-i18n-title="chrome.theme">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
     </button>
   </div>
   <div class="header-group">
-    <select id="tutorial-select" aria-label="选择教程"><option value="">加载中...</option></select>
+    <select id="tutorial-select" data-i18n-aria="chrome.selectTutorial"><option value="" data-i18n="files.loading">加载中...</option></select>
     <div class="menu" id="package-menu">
-      <button id="package-menu-trigger" class="hdr-btn icon-only menu-trigger" title="教程包管理">
+      <button id="package-menu-trigger" class="hdr-btn icon-only menu-trigger" data-i18n-title="chrome.packageMenu">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
       </button>
       <div class="menu-pop">
-        <button type="button" id="library-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span class="m-label"></span></button>
-        <button type="button" id="import-package-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span class="m-label"></span></button>
+        <button type="button" id="library-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span class="m-label" data-i18n="package.library"></span></button>
+        <button type="button" id="import-package-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span class="m-label" data-i18n="package.openMlab"></span></button>
       </div>
     </div>
     <div class="menu" id="save-menu">
-      <button id="save-menu-trigger" class="hdr-btn icon-only menu-trigger" title="存档导入导出">
+      <button id="save-menu-trigger" class="hdr-btn icon-only menu-trigger" data-i18n-title="chrome.saveMenu">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
       </button>
       <div class="menu-pop">
-        <button type="button" id="export-save-btn" disabled><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span class="m-label"></span></button>
-        <button type="button" id="import-save-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span class="m-label"></span></button>
+        <button type="button" id="export-save-btn" disabled><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span class="m-label" data-i18n="save.exportProgress"></span></button>
+        <button type="button" id="import-save-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span class="m-label" data-i18n="save.importProgress"></span></button>
       </div>
     </div>
   </div>
 
-  <!-- 中: runtime + 诊断/日志 -->
+  <!-- 中: runtime -->
   <div class="header-group">
-    <select id="kernel-select" title="当前教程可用 kernel" disabled aria-label="选择 kernel">
-      <option value="">kernel…</option>
+    <select id="kernel-select" data-i18n-title="kernel.titleFallback" disabled data-i18n-aria="chrome.selectKernel">
+      <option value="" data-i18n="chrome.kernelPlaceholder">kernel…</option>
     </select>
-    <button id="reconnect-btn" class="hdr-btn icon-only" title="重连终端到当前 runtime" disabled>
+    <button id="reconnect-btn" class="hdr-btn icon-only" data-i18n-title="chrome.reconnect" disabled>
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
     </button>
-    <button id="trust-btn" class="trust-badge" title="当前 package trust 状态" disabled data-state="">
-      <span class="status-dot"></span><span class="lbl">未加载</span>
-    </button>
-  </div>
-  <div class="header-group">
-    <button id="logs-btn" class="hdr-btn icon-only" title="打开会话日志面板" style="display:none">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
-    </button>
-    <button id="diag-btn" class="hdr-btn icon-only" title="打开诊断面板" style="display:none">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+    <button id="trust-btn" class="trust-badge" data-i18n-title="trust.title" disabled data-state="">
+      <span class="status-dot"></span><span class="lbl" data-i18n="trust.unloaded">未加载</span>
     </button>
   </div>
 
@@ -795,24 +779,24 @@
 
   <!-- 右: 编辑操作 ‖ 主操作 ‖ 主题/export -->
   <div class="header-group">
-    <button id="revert-btn" class="hdr-btn icon-only" title="重置当前 step">
+    <button id="revert-btn" class="hdr-btn icon-only" data-i18n-title="chrome.revert">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
     </button>
-    <button id="save-btn" class="hdr-btn icon-only" title="保存到容器 (Ctrl+S)">
+    <button id="save-btn" class="hdr-btn icon-only" data-i18n-title="chrome.save">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
     </button>
-    <button id="interrupt-btn" class="hdr-btn icon-only" title="中断 (Ctrl+C)">
+    <button id="interrupt-btn" class="hdr-btn icon-only" data-i18n-title="chrome.interrupt">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
     </button>
   </div>
   <div class="header-group">
-    <button id="run-btn" class="hdr-btn primary" title="运行 (Ctrl+Enter)">
+    <button id="run-btn" class="hdr-btn primary" data-i18n-title="chrome.run">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21"/></svg>
     </button>
-    <button id="test-btn" class="hdr-btn primary" title="检查当前 step">
+    <button id="test-btn" class="hdr-btn primary" data-i18n-title="chrome.test">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20,6 9,17 4,12"/></svg>
     </button>
-    <button id="preview-btn" class="hdr-btn primary" title="预览" style="display:none">
+    <button id="preview-btn" class="hdr-btn primary" data-i18n-title="chrome.preview" style="display:none">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
     </button>
   </div>
@@ -825,38 +809,60 @@
   <section class="tutorial-panel" id="tutorial-panel">
     <div class="tutorial-content" id="tutorial-content">
       <div class="tutorial-placeholder">
-        <div class="ph-title">正在加载教程</div>
-        <div class="ph-sub">MultiLab 正在读取本地教程目录与已导入的包。</div>
+        <div class="ph-title" data-i18n="tutorial.placeholderLoadingTitle">正在加载教程</div>
+        <div class="ph-sub" data-i18n="tutorial.placeholderLoadingSub">MultiLab 正在读取本地教程目录与已导入的包。</div>
       </div>
     </div>
   </section>
   <div class="drag-handle-v" id="drag-v"></div>
   <section class="workspace-panel" id="workspace-panel">
     <div class="workspace-main" id="workspace-main">
-      <aside class="file-tree-panel" id="file-tree-panel">
-        <div class="file-tree-head">
-          <span class="tree-title">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-            Files
-          </span>
-          <div class="tree-actions">
-            <button type="button" id="file-tree-collapse-btn" title="收起文件树">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-            </button>
+      <div class="editor-column" id="editor-column">
+        <div class="file-tabs" id="file-tabs"></div>
+        <div class="editor-wrap" id="editor-wrap">
+          <div id="monaco"></div>
+          <div class="editor-view" id="pane-test-results">
+            <div class="aux-empty">
+              <svg class="empty-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              <span data-i18n="chrome.testEmpty">运行检查后，结果会显示在这里。</span>
+            </div>
+          </div>
+          <div class="editor-view" id="pane-web-preview">
+            <div class="aux-empty">
+              <svg class="empty-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              <span data-i18n="chrome.previewEmpty">运行预览命令后，内容会显示在这里。</span>
+            </div>
+          </div>
+          <div class="editor-view" id="pane-logs">
+            <div class="aux-empty">
+              <svg class="empty-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <span data-i18n="panels.logsEmpty">会话日志会显示在这里。</span>
+            </div>
+          </div>
+          <div class="editor-view" id="pane-diagnostics">
+            <div class="aux-empty">
+              <svg class="empty-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+              <span data-i18n="diagnostics.emptyHint">打开教程后可查看 kernel / trust / runtime 诊断。</span>
+            </div>
           </div>
         </div>
+      </div>
+      <div class="drag-handle-v" id="drag-v-tree" style="display:none"></div>
+      <aside class="file-tree-panel" id="file-tree-panel">
         <div class="file-tree-body" id="file-tree-body">
-          <div class="file-tree-empty">加载中...</div>
+          <div class="file-tree-empty" data-i18n="files.loading">加载中...</div>
         </div>
       </aside>
-      <div class="drag-handle-v" id="drag-v-tree" style="display:none"></div>
-      <div class="editor-column" id="editor-column">
-        <div class="file-tabs" id="file-tabs">
-          <button class="tab-show-tree" id="tab-show-tree-btn" type="button" title="显示文件树" style="display:none">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
-          </button>
-        </div>
-        <div class="editor-wrap" id="editor-wrap"><div id="monaco"></div></div>
+      <div class="activity-rail" id="activity-rail">
+        <button class="rail-btn" id="tab-show-tree-btn" type="button" data-i18n-title="files.treeTitle" data-i18n-aria="files.toggleTree" aria-pressed="false">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+        </button>
+        <button class="rail-btn" id="logs-btn" type="button" data-i18n-title="views.logs">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
+        </button>
+        <button class="rail-btn" id="diag-btn" type="button" data-i18n-title="views.diagnostics">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        </button>
       </div>
     </div>
     <div class="drag-handle-h" id="drag-h"></div>
@@ -864,51 +870,15 @@
       <div id="terminal"></div>
     </div>
   </section>
-  <div class="drag-handle-v" id="drag-v-aux" style="display:none"></div>
-  <aside class="aux-panel" id="aux-panel">
-    <div class="aux-tabs">
-      <button type="button" data-aux-tab="test-results" class="active">检查结果</button>
-      <button type="button" data-aux-tab="web-preview">Preview</button>
-      <button type="button" data-aux-tab="logs">日志</button>
-      <button type="button" data-aux-tab="diagnostics">诊断</button>
-      <button type="button" class="aux-close" id="aux-close-btn" title="关闭面板" aria-label="关闭面板">×</button>
-    </div>
-    <div class="aux-body">
-      <div class="aux-pane active" id="pane-test-results">
-        <div class="aux-empty">
-          <svg class="empty-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-          <span>运行检查后，结果会显示在这里。</span>
-        </div>
-      </div>
-      <div class="aux-pane" id="pane-web-preview">
-        <div class="aux-empty">
-          <svg class="empty-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-          <span>运行预览命令后，内容会显示在这里。</span>
-        </div>
-      </div>
-      <div class="aux-pane" id="pane-logs">
-        <div class="aux-empty">
-          <svg class="empty-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-          <span>会话日志会显示在这里。</span>
-        </div>
-      </div>
-      <div class="aux-pane" id="pane-diagnostics">
-        <div class="aux-empty">
-          <svg class="empty-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-          <span>打开教程后可查看 kernel / trust / runtime 诊断。</span>
-        </div>
-      </div>
-    </div>
-  </aside>
 </main>
 
 <footer class="step-bar">
   <div class="step-nav">
-    <button id="prev-step" type="button">
+    <button id="prev-step" type="button" data-i18n-title="tutorial.prev">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
     </button>
     <div class="step-dots" id="step-dots"></div>
-    <button id="next-step" type="button">
+    <button id="next-step" type="button" data-i18n-title="tutorial.next">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
     </button>
   </div>
@@ -925,13 +895,13 @@
       <div class="picker-header-actions">
         <button class="picker-refresh" id="picker-refresh-btn">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/></svg>
-          刷新
+          <span data-i18n="chrome.refresh">刷新</span>
         </button>
-        <button type="button" class="picker-close" id="file-picker-close-btn" title="关闭" aria-label="关闭">×</button>
+        <button type="button" class="picker-close" id="file-picker-close-btn" data-i18n-title="chrome.close" data-i18n-aria="chrome.close">×</button>
       </div>
     </div>
     <div class="picker-body" id="file-picker-list">
-      <div class="file-empty">加载中...</div>
+      <div class="file-empty" data-i18n="files.loading">加载中...</div>
     </div>
   </div>
 </div>
@@ -940,17 +910,17 @@
 <div class="picker-overlay" id="library-overlay" style="display:none">
   <div class="library-dropdown" id="library-dropdown">
     <div class="picker-header">
-      <span class="ph-label">已导入教程库</span>
+      <span class="ph-label" data-i18n="chrome.libraryImported">已导入教程库</span>
       <div class="picker-header-actions">
         <button class="picker-refresh" id="library-refresh-btn">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/></svg>
-          刷新
+          <span data-i18n="chrome.refresh">刷新</span>
         </button>
-        <button type="button" class="picker-close" id="library-close-btn" title="关闭" aria-label="关闭">×</button>
+        <button type="button" class="picker-close" id="library-close-btn" data-i18n-title="chrome.close" data-i18n-aria="chrome.close">×</button>
       </div>
     </div>
     <div class="library-body" id="library-list">
-      <div class="library-empty">加载中...</div>
+      <div class="library-empty" data-i18n="files.loading">加载中...</div>
     </div>
   </div>
 </div>
@@ -961,19 +931,19 @@
     <div class="dialog-icon" id="trust-dialog-icon">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
     </div>
-    <h3 id="trust-dialog-title">确认信任此教程包？</h3>
-    <p id="trust-dialog-body">信任后仍会按 package 安全策略与 sandbox 限制执行命令。只应信任你了解来源的包。</p>
-    <div class="digest-label">Package digest</div>
+    <h3 id="trust-dialog-title" data-i18n="trust.confirmGrantTitle">确认信任此教程包？</h3>
+    <p id="trust-dialog-body" data-i18n="trust.confirmGrantBody">信任表示你接受运行该包声明的命令。MultiLab 仍会按 security / sandbox / network 策略限制执行。不要信任来源不明的包。</p>
+    <div class="digest-label" data-i18n="chrome.packageDigest">Package digest</div>
     <div class="digest" id="trust-dialog-digest"></div>
     <div class="trust-actions">
-      <button type="button" id="trust-cancel-btn">取消</button>
-      <button type="button" id="trust-confirm-btn" class="primary">确认信任</button>
+      <button type="button" id="trust-cancel-btn" data-i18n="dialog.cancel">取消</button>
+      <button type="button" id="trust-confirm-btn" class="primary" data-i18n="trust.confirmGrantAction">确认信任</button>
     </div>
   </div>
 </div>
 
 <!-- 加载提示 -->
-<div id="loading-msg"><span class="spinner"></span>正在加载编辑器...</div>
+<div id="loading-msg"><span class="spinner"></span><span data-i18n="chrome.loadingEditor">正在加载编辑器...</span></div>
 
 <script type="module" src="/js/main.js"></script>
 </body>

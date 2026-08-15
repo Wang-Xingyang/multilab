@@ -42,7 +42,7 @@ export function initLayout() {
     document.addEventListener('mouseup', up);
   });
 
-  // file-tree | state.editor
+  // editor | file-tree | toggle rail (tree opens left of a fixed right-edge button)
   let treeW = parseFloat(localStorage.getItem('ml-tree-w')) || 200;
   function applyTreeW() {
     fileTreePanel.style.width = treeW + 'px';
@@ -55,7 +55,7 @@ export function initLayout() {
     document.getElementById('drag-v-tree').classList.add('active');
     document.body.style.cursor = 'col-resize';
     function move(ev) {
-      treeW = Math.max(140, Math.min(360, startW + (ev.clientX - startX)));
+      treeW = Math.max(140, Math.min(360, startW - (ev.clientX - startX)));
       applyTreeW();
     }
     function up() {

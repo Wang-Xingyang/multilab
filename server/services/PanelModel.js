@@ -11,7 +11,7 @@ export const KNOWN_PANEL_TYPES = new Set([
 
 export const FALLBACK_PANELS = [
   { id: 'tutorial', type: 'tutorial', area: 'left' },
-  { id: 'files', type: 'file-tree', area: 'center-left' },
+  { id: 'files', type: 'file-tree', area: 'center-right' },
   { id: 'editor', type: 'editor', area: 'center' },
   { id: 'terminal', type: 'terminal', area: 'bottom' },
 ];
@@ -57,8 +57,8 @@ function defaultAreaForType(type) {
   if (type === 'tutorial') return 'left';
   if (type === 'terminal') return 'bottom';
   if (type === 'test-results' || type === 'web-preview' || type === 'logs' || type === 'diagnostics') {
-    return 'right';
+    return 'center';
   }
-  if (type === 'file-tree') return 'center-left';
+  if (type === 'file-tree') return 'center-right';
   return 'center';
 }

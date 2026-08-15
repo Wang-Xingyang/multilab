@@ -24,6 +24,13 @@ import {
 } from './file-tree.js';
 import { setPickerOpenHandler, closeFilePicker } from './file-picker.js';
 import { confirmDialog } from './dialog.js';
+import {
+  appendViewTabs,
+  deactivateEditorView,
+  clearStepEditorViews,
+  setViewTabsChangedHandler,
+} from './editor-views.js';
+import { fileTabIcon, tabCloseIcon } from './tab-icons.js';
 
 function langForName(name) {
   const ext = (name.split('.').pop() || '').toLowerCase();
@@ -75,13 +82,14 @@ function loadFilesIntoEditor(files, { ui, entryFile } = {}) {
     ? ui.active_file
     : (names[0] || null);
   state.activeFileIndex = activeName ? names.indexOf(activeName) : -1;
+  state.fileListCache = null;
+  clearStepEditorViews();
   renderFileTabs();
   if (state.activeFileIndex >= 0) {
     switchFile(state.activeFileIndex, true);
   } else {
     setEditorEmpty();
   }
-  state.fileListCache = null;
   if (panelDeclared('file-tree')) refreshFileTree(true);
 }
 
@@ -94,15 +102,15 @@ function currentStepUi() {
 // ========== 文件标签栏 ==========
 function renderFileTabs() {
   const container = document.getElementById('file-tabs');
-  const showTreeBtn = document.getElementById('tab-show-tree-btn');
-  // 只移除 .tab, 保留静态的 tab-show-tree-btn (不再用 innerHTML='' 清空)
   container.querySelectorAll('.tab').forEach(el => el.remove());
   const fragment = document.createDocumentFragment();
   state.currentFiles.forEach((f, i) => {
     const tab = document.createElement('div');
-    tab.className = 'tab' + (i === state.activeFileIndex ? ' active' : '');
+    const fileActive = !state.activeViewId && i === state.activeFileIndex;
+    tab.className = 'tab' + (fileActive ? ' active' : '');
+    tab.appendChild(fileTabIcon(f.name));
     const name = document.createElement('span');
-    name.textContent = f.name || 'untitled';
+    name.textContent = f.name || t('files.untitled');
     tab.appendChild(name);
     if (state.fileModified[i]) {
       const dot = document.createElement('span');
@@ -113,7 +121,7 @@ function renderFileTabs() {
     const close = document.createElement('span');
     close.className = 'tab-close';
     close.title = t('files.closeTab');
-    close.textContent = '×';
+    close.appendChild(tabCloseIcon());
     close.addEventListener('click', (e) => { e.stopPropagation(); closeFile(i); });
     tab.appendChild(close);
     tab.addEventListener('click', (e) => {
@@ -122,9 +130,11 @@ function renderFileTabs() {
     });
     fragment.appendChild(tab);
   });
-  if (showTreeBtn) container.insertBefore(fragment, showTreeBtn);
-  else container.appendChild(fragment);
+  appendViewTabs(fragment);
+  container.appendChild(fragment);
 }
+
+setViewTabsChangedHandler(renderFileTabs);
 
 function closeFile(idx) {
   if (idx < 0 || idx >= state.currentFiles.length) return;
@@ -258,8 +268,10 @@ setPickerOpenHandler(openFileFromContainer);
 
 function switchFile(idx, force = false) {
   if (idx < 0 || idx >= state.currentFiles.length) return;
-  if (!force && idx === state.activeFileIndex) return;
+  const viewWasActive = Boolean(state.activeViewId);
+  if (!force && idx === state.activeFileIndex && !viewWasActive) return;
   if (!force) syncActiveEditor();
+  deactivateEditorView();
   state.activeFileIndex = idx;
   const f = state.currentFiles[idx];
   if (state.editor) {

@@ -17,8 +17,8 @@ export const state = {
   stepLoadSeq: 0,
   fileListCache: null,
   fileListFetching: false,
-  auxVisible: false,
-  activeAuxTab: 'test-results',
+  openViewTabs: [],
+  activeViewId: null,
   wsForceClose: false,
   wsReconnectTimer: null,
   fileTreeFetching: false,
@@ -28,12 +28,10 @@ export const state = {
 
 export const FALLBACK_PANELS = [
   { id: 'tutorial', type: 'tutorial', area: 'left' },
-  { id: 'files', type: 'file-tree', area: 'center-left' },
+  { id: 'files', type: 'file-tree', area: 'center-right' },
   { id: 'editor', type: 'editor', area: 'center' },
   { id: 'terminal', type: 'terminal', area: 'bottom' },
 ];
-
-export const AUX_PANEL_TYPES = ['test-results', 'web-preview', 'logs', 'diagnostics'];
 
 export const TERM_THEME = {
   dark: {

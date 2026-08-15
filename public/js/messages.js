@@ -1,6 +1,7 @@
 /**
  * Frontend copy catalog.
  * Use t('group.key', { name: 'x' }) so UI strings stay out of feature modules.
+ * Static HTML uses data-i18n / data-i18n-title / data-i18n-aria + applyStaticCopy().
  */
 
 const catalog = {
@@ -116,6 +117,7 @@ const catalog = {
     listFailedTitle: '加载教程列表失败',
     listFailedHint: '请确认后端服务运行在 http://localhost:{port}',
     backendHint: '请确认后端服务运行在 http://localhost:{port}',
+    unknownDir: '(未知)',
   },
   files: {
     openFailed: '打开文件失败: {error}',
@@ -124,10 +126,19 @@ const catalog = {
     emptyEditor: '// No files for this step\n',
     loadingEditor: '// Loading tutorial...',
     closeTab: '关闭',
+    untitled: 'untitled',
+    treeTitle: '文件',
     readFailed: '读取失败',
     readDirFailed: '读取目录失败',
-    collapseTree: '收起文件树',
+    collapseTree: '隐藏文件树',
     expandTree: '显示文件树',
+    toggleTree: '显示或隐藏文件树',
+  },
+  views: {
+    preview: '预览',
+    testResults: '检查结果',
+    logs: '日志',
+    diagnostics: '诊断',
   },
   commands: {
     wsDisconnected: 'WebSocket 未连接',
@@ -158,6 +169,31 @@ const catalog = {
   },
   diagnostics: {
     openTutorial: '打开教程后可查看诊断信息。',
+    emptyHint: '打开教程后可查看 kernel / trust / runtime 诊断。',
+  },
+  chrome: {
+    theme: '切换主题',
+    selectTutorial: '选择教程',
+    packageMenu: '教程包管理',
+    saveMenu: '存档导入导出',
+    selectKernel: '选择 kernel',
+    kernelPlaceholder: 'kernel…',
+    reconnect: '重连终端到当前 runtime',
+    logs: '打开会话日志',
+    diagnostics: '打开诊断',
+    revert: '重置当前 step',
+    save: '保存到容器 (Ctrl+S)',
+    interrupt: '中断 (Ctrl+C)',
+    run: '运行 (Ctrl+Enter)',
+    test: '检查当前 step',
+    preview: '预览',
+    loadingEditor: '正在加载编辑器...',
+    refresh: '刷新',
+    close: '关闭',
+    libraryImported: '已导入教程库',
+    packageDigest: 'Package digest',
+    testEmpty: '运行检查后，结果会显示在这里。',
+    previewEmpty: '运行预览命令后，内容会显示在这里。',
   },
   dialog: {
     confirm: '确认',
@@ -176,6 +212,22 @@ export function t(path, vars = {}) {
   return value.replace(/\{(\w+)\}/g, (_, key) => (
     vars[key] == null ? '' : String(vars[key])
   ));
+}
+
+/** Fill static HTML marked with data-i18n / data-i18n-title / data-i18n-aria. */
+export function applyStaticCopy(root = document) {
+  root.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (key) el.textContent = t(key);
+  });
+  root.querySelectorAll('[data-i18n-title]').forEach(el => {
+    const key = el.getAttribute('data-i18n-title');
+    if (key) el.title = t(key);
+  });
+  root.querySelectorAll('[data-i18n-aria]').forEach(el => {
+    const key = el.getAttribute('data-i18n-aria');
+    if (key) el.setAttribute('aria-label', t(key));
+  });
 }
 
 export function getCatalog() {

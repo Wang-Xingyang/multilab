@@ -1,5 +1,5 @@
 /**
- * File tree panel (center-left).
+ * File tree panel (center-right, opens left of a fixed toggle rail).
  *
  * Decoupled from files.js: the "open file" action is injected via
  * setFileTreeOpenHandler so this module never imports files.js,
@@ -22,6 +22,7 @@ import { state } from './state.js';
 import { apiGet } from './api.js';
 import { t } from './messages.js';
 import { panelDeclared } from './panels.js';
+import { fileTabIcon, folderIcon } from './tab-icons.js';
 
 let openHandler = null;
 
@@ -70,7 +71,11 @@ export function renderFileTree(entries) {
     item.style.setProperty('--depth', String(depth));
     item.dataset.path = entry.path;
     item.title = entry.relative;
-    item.textContent = entry.name;
+    item.appendChild(entry.type === 'dir' ? folderIcon() : fileTabIcon(entry.name, 13));
+    const label = document.createElement('span');
+    label.className = 'file-tree-name';
+    label.textContent = entry.name;
+    item.appendChild(label);
     if (entry.type === 'file') {
       if (entry.path === state.fileTreeActivePath) item.classList.add('active');
       item.addEventListener('click', () => openHandler?.(entry.path));

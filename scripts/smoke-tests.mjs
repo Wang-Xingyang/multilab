@@ -440,7 +440,9 @@ await test('PreviewPortMap rewrites container URLs via host map', () => {
 await test('Frontend messages catalog resolves keys', () => {
   assert.equal(t('trust.trusted'), '已信任');
   assert.equal(t('kernel.switched', { id: 'gcc' }), '已切换到 gcc');
+  assert.equal(t('chrome.theme'), '切换主题');
   assert.ok(Object.keys(getCatalog().commands).length >= 5);
+  assert.ok(Object.keys(getCatalog().chrome).length >= 5);
   assert.equal(t('missing.key.not.real'), 'missing.key.not.real');
 });
 

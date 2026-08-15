@@ -1,16 +1,14 @@
 import { state, currentTutorialKey } from './state.js';
-import { t } from './messages.js';
+import { t, applyStaticCopy } from './messages.js';
 import { toast } from './ui.js';
 import { initTheme } from './theme.js';
 import { renderTrustButton, selectKernelFromUi } from './kernel.js';
 import { initLayout } from './layout.js';
 import { initTerminal, initWS, reconnectWS, setFileTreeChangeCallback } from './terminal.js';
 import {
-  applyPanelLayout,
-  setAuxTab,
   revealAuxPanel,
   setPanelHooks,
-  panelDeclared,
+  toggleFileTree,
 } from './panels.js';
 import {
   loadTutorialList,
@@ -70,13 +68,7 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('.menu')) document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
 });
 
-// 菜单项 / 底部 step 按钮文案填充 (走 messages.js t())
-document.querySelector('#library-btn .m-label').textContent = t('package.library');
-document.querySelector('#import-package-btn .m-label').textContent = t('package.openMlab');
-document.querySelector('#export-save-btn .m-label').textContent = t('save.exportProgress');
-document.querySelector('#import-save-btn .m-label').textContent = t('save.importProgress');
-document.getElementById('prev-step').title = t('tutorial.prev');
-document.getElementById('next-step').title = t('tutorial.next');
+applyStaticCopy();
 
 setPanelHooks({
   selectStep: (index) => enterStep(index),
@@ -197,11 +189,9 @@ document.getElementById('import-save-file').addEventListener('change', (e) => im
 document.getElementById('trust-btn').addEventListener('click', () => openTrustDialog(state.currentTutorial));
 document.getElementById('logs-btn').addEventListener('click', () => {
   revealAuxPanel('logs');
-  renderLogsPane();
 });
 document.getElementById('diag-btn').addEventListener('click', () => {
   revealAuxPanel('diagnostics');
-  refreshDiagnosticsPane(currentTutorialKey());
 });
 document.getElementById('save-btn').addEventListener('click', saveFile);
 document.getElementById('revert-btn').addEventListener('click', resetCurrentStep);
@@ -215,32 +205,7 @@ document.getElementById('next-step').onclick = () => {
   }
 };
 document.getElementById('preview-btn').addEventListener('click', runPreview);
-document.getElementById('file-tree-collapse-btn').title = t('files.collapseTree');
-document.getElementById('tab-show-tree-btn').title = t('files.expandTree');
-function setFileTreeCollapsed(collapsed) {
-  state.fileTreeCollapsed = collapsed;
-  const treePanel = document.getElementById('file-tree-panel');
-  const dragTree = document.getElementById('drag-v-tree');
-  const showTree = treePanel.classList.contains('visible');
-  treePanel.classList.toggle('collapsed', collapsed);
-  dragTree.style.display = (showTree && !collapsed) ? '' : 'none';
-  document.getElementById('tab-show-tree-btn').style.display = (collapsed && showTree) ? '' : 'none';
-  if (!collapsed && showTree) refreshFileTree(false);
-  if (state.fitAddon) state.fitAddon.fit();
-}
-document.getElementById('file-tree-collapse-btn').addEventListener('click', () => setFileTreeCollapsed(true));
-document.getElementById('tab-show-tree-btn').addEventListener('click', () => setFileTreeCollapsed(false));
-document.getElementById('aux-close-btn').addEventListener('click', () => {
-  state.auxVisible = false;
-  applyPanelLayout();
-});
-document.querySelectorAll('#aux-panel [data-aux-tab]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    setAuxTab(btn.dataset.auxTab);
-    state.auxVisible = true;
-    applyPanelLayout();
-  });
-});
+document.getElementById('tab-show-tree-btn').addEventListener('click', toggleFileTree);
 
 initTrustDialog({
   async onChanged(nextTrust) {
@@ -251,7 +216,7 @@ initTrustDialog({
     renderTrustButton();
     appendSessionLog(result.trust === 'user-trusted' ? t('trust.logGranted') : t('trust.logRevoked'), 'warn');
     toast(result.trust === 'user-trusted' ? t('trust.markedTrusted') : t('trust.markedUntrusted'));
-    if (panelDeclared('diagnostics')) refreshDiagnosticsPane(currentTutorialKey());
+    refreshDiagnosticsPane(currentTutorialKey());
   },
 });
 

@@ -1,14 +1,11 @@
 import {
   state,
   FALLBACK_PANELS,
-  AUX_PANEL_TYPES,
-  currentTutorialKey,
 } from './state.js';
 import { t } from './messages.js';
 import { apiGet } from './api.js';
 import { normalizeProgress, renderProgressStrip } from './progress.js';
-import { renderLogsPane } from './session-log.js';
-import { refreshDiagnosticsPane } from './diagnostics.js';
+import { openEditorView, setViewOpenGuard } from './editor-views.js';
 
 const panelHooks = {
   selectStep: null,
@@ -36,6 +33,8 @@ function panelDeclared(type) {
   return Boolean(panelDecl(type));
 }
 
+setViewOpenGuard((id) => id === 'logs' || id === 'diagnostics' || panelDeclared(id));
+
 function applyProgressToUi() {
   renderProgressStrip(state.currentTutorial, state.currentProgress, {
     currentStepIndex: state.currentStep,
@@ -55,20 +54,10 @@ function applyPanelLayout() {
   const tutorial = panelDecl('tutorial');
   const terminal = panelDecl('terminal');
   const fileTree = panelDecl('file-tree');
-  const testResults = panelDecl('test-results');
-  const preview = panelDecl('web-preview');
-  const logs = panelDecl('logs');
-  const diagnostics = panelDecl('diagnostics');
 
   const showTutorial = Boolean(tutorial && !tutorial.hidden);
   const showTerminal = !terminal || !terminal.hidden;
   const showFileTree = Boolean(fileTree && !fileTree.hidden);
-  const canShowAux = AUX_PANEL_TYPES.some(type => panelDeclared(type));
-  const showAux = canShowAux && (state.auxVisible
-    || (testResults && !testResults.hidden)
-    || (preview && !preview.hidden)
-    || (logs && !logs.hidden)
-    || (diagnostics && !diagnostics.hidden));
 
   document.getElementById('tutorial-panel').style.display = showTutorial ? '' : 'none';
   document.getElementById('drag-v').style.display = showTutorial ? '' : 'none';
@@ -81,54 +70,40 @@ function applyPanelLayout() {
   treePanel.classList.toggle('visible', showFileTree);
   treePanel.classList.toggle('collapsed', treeCollapsed);
   dragTree.style.display = (showFileTree && !treeCollapsed) ? '' : 'none';
-  const showTreeBtn = document.getElementById('tab-show-tree-btn');
-  if (showTreeBtn) showTreeBtn.style.display = (showFileTree && treeCollapsed) ? '' : 'none';
+  const treeToggle = document.getElementById('tab-show-tree-btn');
+  if (treeToggle) {
+    treeToggle.style.display = showFileTree ? '' : 'none';
+    treeToggle.classList.toggle('is-open', showFileTree && !treeCollapsed);
+    treeToggle.title = t('files.treeTitle');
+    treeToggle.setAttribute('aria-label', t('files.toggleTree'));
+    treeToggle.setAttribute('aria-pressed', showFileTree && !treeCollapsed ? 'true' : 'false');
+  }
   if (showFileTree && !treeCollapsed) {
     const body = document.getElementById('file-tree-body');
     if (!body.querySelector('.file-tree-item')) panelHooks.refreshTree?.(false);
   }
 
-  const aux = document.getElementById('aux-panel');
-  const dragAux = document.getElementById('drag-v-aux');
-  aux.classList.toggle('visible', showAux);
-  dragAux.style.display = showAux ? '' : 'none';
-
-  for (const type of AUX_PANEL_TYPES) {
-    const tab = aux.querySelector(`[data-aux-tab="${type}"]`);
-    if (tab) tab.style.display = panelDeclared(type) ? '' : 'none';
-  }
-
   const logsBtn = document.getElementById('logs-btn');
   const diagBtn = document.getElementById('diag-btn');
-  if (logsBtn) logsBtn.style.display = panelDeclared('logs') ? '' : 'none';
-  if (diagBtn) diagBtn.style.display = panelDeclared('diagnostics') ? '' : 'none';
+  if (logsBtn) logsBtn.classList.toggle('is-open', state.activeViewId === 'logs');
+  if (diagBtn) diagBtn.classList.toggle('is-open', state.activeViewId === 'diagnostics');
 
-  if (showAux) {
-    if (!panelDeclared(state.activeAuxTab)) {
-      state.activeAuxTab = AUX_PANEL_TYPES.find(type => panelDeclared(type)) || 'test-results';
-    }
-    setAuxTab(state.activeAuxTab);
-    if (state.activeAuxTab === 'logs') renderLogsPane();
-    if (state.activeAuxTab === 'diagnostics') refreshDiagnosticsPane(currentTutorialKey());
-  }
   applyProgressToUi();
 }
 
-function setAuxTab(tab) {
-  state.activeAuxTab = tab;
-  document.querySelectorAll('#aux-panel [data-aux-tab]').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.auxTab === tab);
-  });
-  document.querySelectorAll('#aux-panel .aux-pane').forEach(pane => {
-    pane.classList.toggle('active', pane.id === `pane-${tab}`);
-  });
+export function setFileTreeCollapsed(collapsed) {
+  state.fileTreeCollapsed = collapsed;
+  applyPanelLayout();
+  if (!collapsed) panelHooks.refreshTree?.(false);
+  if (state.fitAddon) state.fitAddon.fit();
+}
+
+export function toggleFileTree() {
+  setFileTreeCollapsed(!state.fileTreeCollapsed);
 }
 
 function revealAuxPanel(tab) {
-  if (!AUX_PANEL_TYPES.includes(tab) || !panelDeclared(tab)) return;
-  state.auxVisible = true;
-  state.activeAuxTab = tab;
-  applyPanelLayout();
+  openEditorView(tab);
 }
 
 function showTestResults(result) {
@@ -244,7 +219,6 @@ export {
   applyProgressToUi,
   applyProgress,
   applyPanelLayout,
-  setAuxTab,
   revealAuxPanel,
   showTestResults,
   renderPreviewFrame,
