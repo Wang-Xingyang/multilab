@@ -23,8 +23,8 @@ The player is a Node frontend + backend on Windows or Linux. The lab machine is 
 
 Host save is the source of truth. The lab only holds the current step:
 
-- Linux ext4 (including Docker-on-WSL ext4): bind-mount the host save tree once; retarget `/home/student/workspace` at the current step `files/` directory (`mount --bind` when allowed, else a symlink). Same disk, no copy.
-- Windows NTFS (and `/mnt/c`): copy only the current step into the container via `RuntimeSession.writeFiles` / `readFiles`. Do not bind-mount NTFS.
+- Linux ext4 (including Docker-on-WSL ext4): bind-mount the host save tree once at `/mlab/saves` (outside `$HOME`); retarget `/home/student/workspace` at the current step `files/` directory with a symlink. Same disk, no copy. Switching tutorials does not recreate the container. `ls ~` does not show the save tree. Do not inner-bind the workspace — open shells cannot detect that retarget.
+- Windows NTFS (and `/mnt/c`): copy only the current step into the container via `RuntimeSession.writeFiles` / `readFiles`. Switching steps snapshots the live tree back onto the host save first. Do not bind-mount NTFS.
 
 Save, run, step switch, exit, and export all flush the live workspace back into the host save for that step, then pack `.mlab-save` from the host save. `.mlab` is the tutorial; `.mlab-save` is progress.
 
@@ -65,13 +65,13 @@ Docker runtime
 
 Docker is the only registered lab provider. `RuntimeManager` selects it from the resolved kernel's `provider` field, then asks it to `planKernelSession`, `applyKernel`, and `startSession`. Every provider implements `probe(kernel)` and `capabilities()`; captured commands honor manifest `timeout_sec` through `RuntimeSession.runCaptured(script, { timeoutMs })`. `CommandService` / `SaveService` talk to this contract, not dockerode.
 
-The workspace is logically owned by MultiLab through `WorkspaceService`. The physical IO strategy is `RuntimeProvider.workspaceStrategy`: bind-mount on Linux ext4, copy (`runtime-internal`) on Windows.
+The workspace is logically owned by MultiLab through `WorkspaceService`. The physical IO strategy is `RuntimeProvider.workspaceStrategy`: bind-mount on Linux ext4, copy on Windows (`kind: "copy"`; `WORKSPACE_STRATEGY=runtime-internal` is still accepted as an alias).
 
-On Linux/WSL with a fast local filesystem (ext4/xfs/btrfs/tmpfs), Docker bind-mounts `.multilab-state/saves` to `/home/student/.mlab-saves` **once** at container start. Switching steps does not recreate that Docker bind. It retargets `/home/student/workspace` at the current step `files/` dir (`mount --bind` when the exec is allowed, otherwise a symlink). The learner-visible path stays `/home/student/workspace`; the physical `.mlab-saves/<id>/<version>/<digest>/...` tree must not appear in the shell prompt. `WorkspaceService` reads, writes, lists, and watches that save directory on the host. File-tree updates use host `fs.watch` on the bind source plus `find -H` polling as a safety net (content-only edits still do not fire). `find` without `-H` does not descend a symlink start path, so polling must pass `-H`.
+On Linux/WSL with a fast local filesystem (ext4/xfs/btrfs/tmpfs), Docker bind-mounts `.multilab-state/saves` to `/mlab/saves` **once** at container start (mode `711`, not in `$HOME`). Switching tutorials or steps does not recreate that Docker bind. It retargets `/home/student/workspace` at the current step `files/` dir with a symlink (one `ln -sfn`, not an inner `mount --bind`). Bash keeps cwd on the old inode after a symlink swap; already-open shells receive `SIGUSR1` so they `chdir` themselves. The learner-visible path stays `/home/student/workspace`. `WorkspaceService` reads, writes, lists, and watches the current step directory on the host. File-tree updates use host `fs.watch` on that directory plus `find -H` polling as a safety net. `find` without `-H` does not descend a symlink start path, so polling must pass `-H`.
 
 The container `student` uid is aligned to the host process uid so terminal `mkdir` and host Node share ownership. `EACCES` during host clear still falls back to a container-root wipe.
 
-Windows (NTFS) and Windows-drive mounts (`/mnt/c`) copy the **current step only** through `RuntimeSession.exec`. Override with `WORKSPACE_STRATEGY=bind-mount` or `WORKSPACE_STRATEGY=runtime-internal`. Do not bind-mount `/mnt/c`. Runtime kernels provide execution capability; they should not require a MultiLab-specific in-kernel agent.
+Windows (NTFS) and Windows-drive mounts (`/mnt/c`) copy the **current step only** through `RuntimeSession.exec`. `WorkspaceService.flushLiveToHost` writes that live tree back onto the host save on save, step switch, and `.mlab-save` export. Override with `WORKSPACE_STRATEGY=bind-mount` or `WORKSPACE_STRATEGY=copy`. Do not bind-mount `/mnt/c`. Runtime kernels provide execution capability; they should not require a MultiLab-specific in-kernel agent.
 
 Captured command scripts are uploaded through `RuntimeSession.tempScriptPath()` (`/tmp/<step>.<command>.sh`), not into the save directory. Build artifacts belong in the kernel `/tmp`, not the workspace.
 
@@ -227,7 +227,7 @@ Current UI behavior:
 - captured preview output may include `MULTILAB_PREVIEW_HTML` or HTML body for sandboxed `iframe.srcdoc` rendering;
 - `MULTILAB_PREVIEW_URL=...` is rewritten to a host-local mapped URL when the active Docker kernel publishes that container port (`publish_ports`, bound to `127.0.0.1`); otherwise it remains text with guidance to use `gcc-ubuntu24-docker-net` and `security.network_required` / `security.preview_ports`.
 - Packages that need network or preview ports resolve to `gcc-ubuntu24-docker-net` (bridge + sandbox + published ports). Offline packages still require `network_default: none`.
-- `file-tree` panels render a center-right tree from `GET /api/fs/ls?tree=1` (workspace-scoped). A right activity rail holds the explorer / logs / diagnostics icons; the tree opens to the left of that rail so the click target does not move. There is no FILES header. The tree auto-refreshes in real time: `WorkspaceService.watch` uses the current strategy's watcher and pushes `type: "fs_change"` over `/ws`; the frontend re-fetches `GET /api/fs/ls` on receipt. Bind-mount workspaces watch the host directory; `runtime-internal` keeps the find-polling fallback (~1s via `RuntimeSession.exec`). No MultiLab-specific kernel agent is required.
+- `file-tree` panels render a center-right tree from `GET /api/fs/ls?tree=1` (workspace-scoped). A right activity rail holds the explorer / logs / diagnostics icons; the tree opens to the left of that rail so the click target does not move. There is no FILES header. The tree auto-refreshes in real time: `WorkspaceService.watch` uses the current strategy's watcher and pushes `type: "fs_change"` over `/ws`; the frontend re-fetches `GET /api/fs/ls` on receipt. Bind-mount workspaces watch the host directory; copy strategy keeps the find-polling fallback (~1s via `RuntimeSession.exec`). No MultiLab-specific kernel agent is required.
 
 ## Terminal Model
 
@@ -416,8 +416,8 @@ The UI shows a kernel selector for compatible candidates and a "重连终端" bu
 
 - Docker is the only registered lab provider. The player is Node on Windows or Linux; the lab is a container, not the student's WSL distro.
 - Runtime providers implement `probe`, `capabilities`, `planKernelSession`, `applyKernel`, and `startSession`. Sessions implement file IO, `exec`, captured command timeout, terminal, `getPortMap`, `pointWorkspace`, watch, and `dispose`.
-- Host save is durable truth for all steps. The lab workspace is the current step only. Linux ext4 bind-mounts the save tree and retargets `/home/student/workspace`; Windows copies the current step. Do not bind-mount `/mnt/c`.
-- File-tree watch uses host `fs.watch` on the bind source plus `find -H` polling so a workspace symlink still refreshes. The shell prompt maps `.mlab-saves/.../files` to `~/workspace`.
+- Host save is durable truth for all steps. The lab workspace is the current step only. Linux ext4 bind-mounts the save tree at `/mlab/saves` and retargets `/home/student/workspace`; Windows copies the current step and flushes live files back on save/switch/export. Do not bind-mount `/mnt/c`.
+- File-tree watch uses host `fs.watch` on the bind source plus `find -H` polling so a workspace symlink still refreshes. The shell prompt maps `/mlab/saves/.../files` to `~/workspace`.
 - `.mlab` pack/unpack CLI, host-path import, and browser upload/open are implemented.
 - `.mlab-save` host-path export/import and browser upload/download are implemented. Export snapshots the live step into the host save first.
 - Kernel registry is static (Docker `gcc-ubuntu24-docker` and `gcc-ubuntu24-docker-net`).

@@ -102,7 +102,7 @@ try {
     await provider.applyKernel(kernel);
     const session = await provider.startSession();
     await session.ensureWorkspace();
-    await session.pointWorkspace('/home/student/.mlab-saves');
+    await session.pointWorkspace('/mlab/saves');
 
     t0 = performance.now();
     await writeHostWorkspaceFiles(session.workspaceStrategy, files);
@@ -114,7 +114,7 @@ try {
       image: 'multilab/os:latest',
       containerName: 'multilab-ws-latency-internal',
       hostWorkspaceDir: path.join(tmp, 'unused-internal'),
-      workspaceStrategyMode: 'runtime-internal',
+      workspaceStrategyMode: 'copy',
       docker,
     });
     await internalProvider.applyKernel(kernel);
@@ -132,8 +132,8 @@ try {
 
     console.log('\nDocker comparison:');
     console.log(`  bind-mount host write + container sees file: ${dockerBindVisibleMs} ms`);
-    console.log(`  runtime-internal writeFiles (exec copy):     ${dockerWriteMs} ms`);
-    console.log(`  runtime-internal find tree:                  ${dockerFindMs} ms`);
+    console.log(`  copy writeFiles (exec copy):                 ${dockerWriteMs} ms`);
+    console.log(`  copy find tree:                              ${dockerFindMs} ms`);
 
     for (const name of ['multilab-ws-latency', 'multilab-ws-latency-internal']) {
       try {

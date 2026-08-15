@@ -1,4 +1,4 @@
-import { describeRuntimeInternalStrategy } from '../workspace/WorkspaceStrategy.js';
+import { describeCopyStrategy } from '../workspace/WorkspaceStrategy.js';
 import { createFindPollingWatcher } from '../workspace/FindPollingWatcher.js';
 import { describeCapabilities } from './RuntimeContract.js';
 
@@ -13,7 +13,7 @@ import { describeCapabilities } from './RuntimeContract.js';
  *   ensure, ensureWorkspace, writeFiles, readFiles, uploadScript,
  *   runCaptured(script, { timeoutMs }), attachTerminal, interrupt, resize,
  *   tempScriptPath, getPortMap, exec (fallback IO), watchFilesystem,
- *   pointWorkspace (no-op unless bind-mount), dispose
+ *   pointWorkspace (retarget workspace at a save dir), dispose
  *
  * CommandService / SaveService must not import dockerode.
  */
@@ -33,11 +33,11 @@ export class RuntimeProvider {
 
   /**
    * Describe how this provider places the live learner workspace for a kernel.
-   * Default is copy into the session (runtime-internal). Docker on Linux ext4
-   * returns bind-mount instead. Windows uses copy. Do not bind-mount NTFS.
+   * Default is copy into the session. Docker on Linux ext4 returns bind-mount.
+   * Windows uses copy. Do not bind-mount NTFS.
    */
   workspaceStrategy(kernel) {
-    return describeRuntimeInternalStrategy({
+    return describeCopyStrategy({
       location: kernel?.workspace || this.workspaceDir,
     });
   }
@@ -105,7 +105,8 @@ export class RuntimeSession {
   }
 
   async pointWorkspace() {
-    // Optional. Bind-mount providers retarget /home/student/workspace at a save dir.
+    // Optional. Bind-mount sessions retarget /home/student/workspace
+    // at the current step files/ directory (symlink, not an inner bind).
   }
 
   /**

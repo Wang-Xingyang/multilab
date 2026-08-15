@@ -122,13 +122,13 @@ export async function enterStep(targetIndex, opts = {}) {
     document.getElementById('prev-step').disabled = true;
     document.getElementById('next-step').disabled = true;
     if (!opts.skipSave) await saveCurrentStep({ silent: true, force: true });
-    state.currentStep = targetIndex;
-    renderTutorialStepText();
-    applyProgressToUi();
     status(t('tutorial.loadingStep'));
-    const step = currentStepObj();
+    const step = state.currentTutorial.steps[targetIndex];
     const result = await apiJson('/api/steps/load', { tutorial: currentTutorialKey(), step: step.id });
     if (seq !== state.stepLoadSeq) return;
+    // Only now is this the live step. Updating currentStep before load
+    // made save/run persist the previous editor buffers into the new step.
+    state.currentStep = targetIndex;
     applyProgress(result.progress);
     loadFilesIntoEditor(result.files || [], {
       ui: result.ui,

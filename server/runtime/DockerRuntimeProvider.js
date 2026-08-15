@@ -7,10 +7,10 @@ import {
   normalizePublishPorts,
   portMapFromInspect,
 } from '../services/PreviewPortMap.js';
-import { chooseDockerWorkspaceStrategy, SAVES_BIND_TARGET } from '../workspace/WorkspaceStrategy.js';
+import { chooseDockerWorkspaceStrategy, isSavesBindPath, SAVES_BIND_TARGET } from '../workspace/WorkspaceStrategy.js';
 import { ensureHostWorkspaceDir } from '../workspace/HostWorkspace.js';
 import { validateWorkspaceRelPath } from '../services/PackageService.js';
-import { learnerShellEnv, learnerProfileSnippet } from './learnerShellEnv.js';
+import { learnerShellEnv, learnerProfileSnippet, signalAttachedShellsScript } from './learnerShellEnv.js';
 import { describeCapabilities, describeProbe } from './RuntimeContract.js';
 
 export class DockerRuntimeProvider extends RuntimeProvider {
@@ -201,6 +201,10 @@ export class DockerRuntimeSession extends RuntimeSession {
     }
     await this.#alignStudentUid();
     await this.exec(['mkdir', '-p', this.workspaceDir, SAVES_BIND_TARGET], { user: 'root', cwd: '/' });
+    await this.exec(['bash', '-lc', `chmod 711 /mlab ${SAVES_BIND_TARGET} 2>/dev/null || true`], {
+      user: 'root',
+      cwd: '/',
+    });
     if (!hostPath) {
       await this.exec(['chown', '-R', 'student:student', this.workspaceDir], { user: 'root', cwd: '/' });
     }
@@ -211,34 +215,39 @@ export class DockerRuntimeSession extends RuntimeSession {
   async pointWorkspace(containerPath) {
     await this.ensure();
     const target = String(containerPath || '');
-    if (!target.startsWith(`${SAVES_BIND_TARGET}/`) && target !== SAVES_BIND_TARGET) {
+    if (!isSavesBindPath(target)) {
       throw Object.assign(new Error('workspace target escapes save bind'), { statusCode: 403 });
     }
     const quotedTarget = shQuote(target);
     const quotedWs = shQuote(this.workspaceDir);
+    const signal = signalAttachedShellsScript();
+    // One exec: retarget the symlink, then SIGUSR1 open shells. Do not rewrite
+    // profile.d here — that was a docker exec on every step switch.
     const script = `
 set -e
-mkdir -p ${shQuote(SAVES_BIND_TARGET)} "$(dirname ${quotedTarget})" ${quotedTarget}
-# Never rm -rf the workspace: it may already be a bind of the save dir.
+mkdir -p ${quotedTarget}
 if [ -L ${quotedWs} ]; then rm -f ${quotedWs}; fi
-mkdir -p ${quotedWs}
+rmdir ${quotedWs} 2>/dev/null || true
+ln -sfn ${quotedTarget} ${quotedWs}
+${signal}
+`;
+    let result = await this.exec(['bash', '-lc', script], { user: 'root', cwd: '/' });
+    if (result.exitCode !== 0) {
+      const recover = `
+set -e
 if mountpoint -q ${quotedWs} 2>/dev/null; then
   umount ${quotedWs} 2>/dev/null || umount -l ${quotedWs} 2>/dev/null || true
 fi
-if mount --bind ${quotedTarget} ${quotedWs} 2>/dev/null; then
-  exit 0
-fi
-# Fallback: symlink. Prompt env hides the physical .mlab-saves path.
+if [ -L ${quotedWs} ]; then rm -f ${quotedWs}; fi
 rmdir ${quotedWs} 2>/dev/null || true
 ln -sfn ${quotedTarget} ${quotedWs}
+${signal}
 `;
-    let result = await this.exec(['bash', '-lc', script], {
-      user: 'root',
-      cwd: '/',
-      privileged: true,
-    });
-    if (result.exitCode !== 0) {
-      result = await this.exec(['bash', '-lc', script], { user: 'root', cwd: '/' });
+      result = await this.exec(['bash', '-lc', recover], {
+        user: 'root',
+        cwd: '/',
+        privileged: true,
+      });
     }
     if (result.exitCode !== 0) {
       throw new Error(result.stderr || 'failed to point workspace at save directory');
@@ -504,7 +513,7 @@ done
     }
 
     const publishPorts = normalizePublishPorts(this.publishPorts);
-    const workspaceStrategy = this.workspaceStrategy || { kind: 'runtime-internal', hostPath: null };
+    const workspaceStrategy = this.workspaceStrategy || { kind: 'copy', hostPath: null };
     if (workspaceStrategy.hostPath) {
       await ensureHostWorkspaceDir(workspaceStrategy.hostPath);
     }
@@ -660,7 +669,7 @@ function desiredContainerLabels({
   networkMode,
   sandboxPreset,
   publishPorts = [],
-  workspaceKind = 'runtime-internal',
+  workspaceKind = 'copy',
   workspaceHost = null,
   workspaceBind = null,
 }) {
@@ -670,7 +679,7 @@ function desiredContainerLabels({
     'multilab.network': String(networkMode || ''),
     'multilab.sandbox': String(sandboxPreset || ''),
     'multilab.publish': normalizePublishPorts(publishPorts).join(',') || '-',
-    'multilab.workspace.kind': String(workspaceKind || 'runtime-internal'),
+    'multilab.workspace.kind': String(workspaceKind || 'copy'),
     'multilab.workspace.bind': String(workspaceBind || '-'),
     'multilab.workspace.host': workspaceHost
       ? crypto.createHash('sha256').update(String(workspaceHost)).digest('hex').slice(0, 12)

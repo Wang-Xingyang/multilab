@@ -2,8 +2,10 @@ import path from 'path';
 import { LANG_BY_EXT, validateFileName, validateWorkspaceRelPath } from './PackageService.js';
 import {
   DEFAULT_WORKSPACE_LOCATION,
+  describeCopyStrategy,
   describeRuntimeInternalStrategy,
   resolveWorkspaceStrategy,
+  usesCopyStrategy,
   usesHostFilesystem,
 } from '../workspace/WorkspaceStrategy.js';
 import { createFindPollingWatcher } from '../workspace/FindPollingWatcher.js';
@@ -88,9 +90,12 @@ export class WorkspaceService {
 
   /**
    * Make this step's save directory the live workspace.
-   * Bind-mount: host IO uses that directory; Docker retargets
-   * /home/student/workspace at the already-mounted save path.
-   * Copy (Windows): write only this step's files into the session workspace.
+   * Bind-mount: host IO uses that directory; Docker bind-mounts the host
+   * save tree once at /mlab/saves and retargets /home/student/workspace
+   * with a symlink at the current step files/. Switching tutorials does
+   * not recreate the container.
+   * Copy (Windows): snapshot the previous live step back to host, then
+   * write only this step's files into the session workspace.
    */
   async useSaveWorkspace({
     hostPath,
@@ -98,7 +103,11 @@ export class WorkspaceService {
     files = null,
     tutorialId = null,
   } = {}) {
-    this.attachedHostPath = hostPath ? path.resolve(hostPath) : null;
+    const nextHost = hostPath ? path.resolve(hostPath) : null;
+    if (this.attachedHostPath && usesCopyStrategy(this.describe())) {
+      await this.flushLiveToHost({ hostPath: this.attachedHostPath, tutorialId });
+    }
+    this.attachedHostPath = nextHost;
     await this.ensure({ tutorialId });
     const strategy = this.describe();
     if (usesHostFilesystem(strategy) && containerPath) {
@@ -114,6 +123,21 @@ export class WorkspaceService {
 
   usesHostBackedSave() {
     return usesHostFilesystem(this.describe());
+  }
+
+  /**
+   * Copy the live workspace back onto a host save directory.
+   * No-op on bind-mount (live is already that directory).
+   */
+  async flushLiveToHost({ hostPath = this.attachedHostPath, tutorialId = null } = {}) {
+    const dest = hostPath ? path.resolve(hostPath) : null;
+    if (!dest) return { skipped: true, reason: 'no-host' };
+    if (usesHostFilesystem(this.describe())) {
+      return { skipped: true, reason: 'bind-mount' };
+    }
+    const live = await this.snapshot({ tutorialId });
+    await writeHostWorkspaceFiles({ hostPath: dest }, live, { clear: true });
+    return { skipped: false, files: live };
   }
 
   async syncFromFiles(files, { tutorialId = null, clear = true } = {}) {
@@ -377,4 +401,4 @@ export function annotateWorkspaceFile(file) {
 }
 
 export { parseFindTreeOutput, sortWorkspaceTreeEntries } from '../workspace/WorkspaceTree.js';
-export { describeRuntimeInternalStrategy, DEFAULT_WORKSPACE_LOCATION };
+export { describeCopyStrategy, describeRuntimeInternalStrategy, DEFAULT_WORKSPACE_LOCATION };

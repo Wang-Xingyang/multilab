@@ -17,7 +17,7 @@ This repository is an early prototype of the MultiLab host:
 - security: digest-keyed trust store (default `untrusted`) and command-time security policy gates;
 - kernels/runtime: static `KernelRegistry` with offline `gcc-ubuntu24-docker` and networked `gcc-ubuntu24-docker-net` (localhost port publish); `RuntimeManager` binds the selected kernel to Docker and applies network/sandbox/port settings; UI can pick a compatible kernel and reconnect the terminal;
 - saves: versioned step files plus `save.json` progress metadata under `.multilab-state/saves/` (host save is durable truth for all steps);
-- workspace: `WorkspaceService` syncs **only the current step** into the lab; Linux ext4 bind-mounts the host save tree and retargets `/home/student/workspace`; Windows copies that step through the session;
+- workspace: `WorkspaceService` syncs **only the current step** into the lab; Linux ext4 bind-mounts the host save tree at `/mlab/saves` and retargets `/home/student/workspace`; Windows copies that step and flushes it back on save/switch/export;
 - panels: manifest `default_panels` drive tutorial/terminal/file-tree visibility; test-results/web-preview/logs/diagnostics open as editor tabs next to files; progress strip uses `save.json`; trust changes go through a confirmation dialog;
 - checks: `npm run test:smoke` runs a Docker-free service smoke suite.
 

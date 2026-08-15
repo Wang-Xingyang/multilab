@@ -25,6 +25,7 @@ import {
 import { createFindPollingWatcher } from '../server/workspace/FindPollingWatcher.js';
 import {
   WORKSPACE_STRATEGY_KINDS,
+  describeCopyStrategy,
   describeRuntimeInternalStrategy,
   describeBindMountStrategy,
   chooseDockerWorkspaceStrategy,
@@ -44,7 +45,13 @@ import {
   describeProbe,
 } from '../server/runtime/RuntimeContract.js';
 import { CommandService } from '../server/services/CommandService.js';
-import { displayLearnerPath, learnerShellEnv } from '../server/runtime/learnerShellEnv.js';
+import {
+  displayLearnerPath,
+  learnerProfileSnippet,
+  learnerShellEnv,
+  reenterWorkspaceCommand,
+  signalAttachedShellsScript,
+} from '../server/runtime/learnerShellEnv.js';
 import { MlabSaveArchiveService } from '../server/services/MlabSaveArchiveService.js';
 import { KernelSelectionStore } from '../server/services/KernelSelectionStore.js';
 import { sanitizeUploadFilename } from '../server/services/TempArchiveUpload.js';
@@ -454,18 +461,19 @@ await test('KernelRegistry picks net kernel when network/preview ports required'
 
 console.log('\n--- WorkspaceService ---');
 
-await test('Docker/default workspace strategy is runtime-internal fallback', () => {
+await test('Docker/default workspace strategy is copy', () => {
   const provider = new RuntimeProvider({ id: 'test', kind: 'docker' });
   provider.workspaceDir = '/home/student/workspace';
   const strategy = provider.workspaceStrategy({ workspace: '/home/student/workspace' });
-  assert.equal(strategy.kind, WORKSPACE_STRATEGY_KINDS.RUNTIME_INTERNAL);
-  assert.equal(strategy.fallback, true);
+  assert.equal(strategy.kind, WORKSPACE_STRATEGY_KINDS.COPY);
+  assert.equal(strategy.fallback, false);
   assert.equal(strategy.watch, 'find-polling');
   assert.equal(strategy.capabilities.hostBindMount, false);
   assert.equal(strategy.capabilities.nativeWatch, false);
-  const described = describeRuntimeInternalStrategy({ location: '/home/student/workspace' });
+  const described = describeCopyStrategy({ location: '/home/student/workspace' });
   assert.equal(described.location, '/home/student/workspace');
   assert.equal(described.hostPath, null);
+  assert.equal(describeRuntimeInternalStrategy({ location: '/ws' }).kind, WORKSPACE_STRATEGY_KINDS.COPY);
 });
 
 await test('chooseDockerWorkspaceStrategy bind-mounts linux ext4 and refuses slow mounts', async () => {
@@ -474,11 +482,12 @@ await test('chooseDockerWorkspaceStrategy bind-mounts linux ext4 and refuses slo
     const forcedInternal = chooseDockerWorkspaceStrategy({
       location: '/home/student/workspace',
       hostPath: tmp,
-      mode: 'runtime-internal',
+      mode: 'copy',
       platform: 'linux',
     });
-    assert.equal(forcedInternal.kind, WORKSPACE_STRATEGY_KINDS.RUNTIME_INTERNAL);
+    assert.equal(forcedInternal.kind, WORKSPACE_STRATEGY_KINDS.COPY);
     assert.equal(forcedInternal.reason, 'forced');
+    assert.equal(forcedInternal.fallback, true);
 
     const windowsDrive = chooseDockerWorkspaceStrategy({
       location: '/home/student/workspace',
@@ -486,8 +495,9 @@ await test('chooseDockerWorkspaceStrategy bind-mounts linux ext4 and refuses slo
       mode: 'auto',
       platform: 'linux',
     });
-    assert.equal(windowsDrive.kind, WORKSPACE_STRATEGY_KINDS.RUNTIME_INTERNAL);
+    assert.equal(windowsDrive.kind, WORKSPACE_STRATEGY_KINDS.COPY);
     assert.equal(windowsDrive.reason, 'windows-drive');
+    assert.equal(windowsDrive.fallback, false);
 
     const darwin = chooseDockerWorkspaceStrategy({
       location: '/home/student/workspace',
@@ -495,7 +505,25 @@ await test('chooseDockerWorkspaceStrategy bind-mounts linux ext4 and refuses slo
       mode: 'auto',
       platform: 'darwin',
     });
-    assert.equal(darwin.kind, WORKSPACE_STRATEGY_KINDS.RUNTIME_INTERNAL);
+    assert.equal(darwin.kind, WORKSPACE_STRATEGY_KINDS.COPY);
+    assert.equal(darwin.fallback, false);
+
+    const win32 = chooseDockerWorkspaceStrategy({
+      location: '/home/student/workspace',
+      hostPath: tmp,
+      mode: 'auto',
+      platform: 'win32',
+    });
+    assert.equal(win32.kind, WORKSPACE_STRATEGY_KINDS.COPY);
+    assert.equal(win32.reason, 'platform:win32');
+
+    const alias = chooseDockerWorkspaceStrategy({
+      location: '/home/student/workspace',
+      hostPath: tmp,
+      mode: 'runtime-internal',
+      platform: 'linux',
+    });
+    assert.equal(alias.kind, WORKSPACE_STRATEGY_KINDS.COPY);
 
     const auto = chooseDockerWorkspaceStrategy({
       location: '/home/student/workspace',
@@ -510,7 +538,7 @@ await test('chooseDockerWorkspaceStrategy bind-mounts linux ext4 and refuses slo
       assert.equal(auto.capabilities.hostReadable, true);
       assert.equal(auto.watch, 'host-fs');
     } else {
-      assert.equal(auto.kind, WORKSPACE_STRATEGY_KINDS.RUNTIME_INTERNAL);
+      assert.equal(auto.kind, WORKSPACE_STRATEGY_KINDS.COPY);
     }
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
@@ -582,6 +610,7 @@ await test('SaveService bind-mount load points workspace at the step save dir', 
     assert.equal(pointed.length, 1);
     assert.ok(pointed[0].startsWith(`${SAVES_BIND_TARGET}/`));
     assert.ok(pointed[0].endsWith('/steps/01-first-program/files'));
+    assert.ok(pointed[0].includes('/hello-c/'));
     assert.ok(loaded.files.some(file => file.name === 'hello.c'));
     const onDisk = await fs.readFile(path.join(dest, 'hello.c'), 'utf8');
     assert.ok(onDisk.includes('main') || onDisk.length > 0);
@@ -589,6 +618,54 @@ await test('SaveService bind-mount load points workspace at the step save dir', 
     await workspaceService.writeFiles([{ name: 'hello.c', content: 'changed\n' }], { clear: false });
     await saveService.saveStepState('hello-c', '01-first-program');
     assert.equal(await fs.readFile(path.join(dest, 'hello.c'), 'utf8'), 'changed\n');
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('bind-mount step load does not leak files from another step', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-save-iso-'));
+  try {
+    const saves = path.join(tmp, 'saves');
+    const session = {
+      workspaceDir: '/home/student/workspace',
+      workspaceStrategy: describeBindMountStrategy({
+        location: '/home/student/workspace',
+        hostPath: saves,
+        bindTarget: SAVES_BIND_TARGET,
+      }),
+      async ensureWorkspace() {},
+      async pointWorkspace() {},
+      async exec() { throw new Error('session.exec should not run for bind-mount IO'); },
+      async writeFiles() { throw new Error('session.writeFiles should not run for bind-mount IO'); },
+      async readFiles() { throw new Error('session.readFiles should not run for bind-mount IO'); },
+    };
+    const workspaceService = new WorkspaceService({ runtimeSession: session });
+    const packageService = new PackageService({ tutorialsDir: TUTORIALS_DIR });
+    const saveService = new SaveService({
+      runtimeStateDir: tmp,
+      workspaceService,
+      packageService,
+    });
+    const cfg = await packageService.loadTutorial('hello-c');
+    await saveService.loadStepState('hello-c', '01-first-program');
+    await saveService.loadStepState('hello-c', '02-args');
+    const step2Dir = saveService.saveDir(cfg, '02-args');
+    const step2Names = await fs.readdir(step2Dir);
+    assert.ok(step2Names.includes('args.c'), 'step 2 must have its template file');
+    assert.ok(!step2Names.includes('hello.c'), 'step 1 hello.c must not appear in step 2');
+    assert.ok(!step2Names.includes('buggy.c'), 'step 3 buggy.c must not appear in step 2');
+
+    await saveService.saveStepState('hello-c', '01-first-program', [
+      { name: 'hello.c', content: 'from-step-1\n' },
+    ]);
+    const afterSave = await fs.readdir(step2Dir);
+    assert.ok(!afterSave.includes('hello.c'), 'saving step 1 while live is step 2 must not write into step 2');
+    assert.equal(
+      await fs.readFile(path.join(saveService.saveDir(cfg, '01-first-program'), 'hello.c'), 'utf8'),
+      'from-step-1\n',
+    );
+    assert.equal(workspaceService.describe().hostPath, step2Dir);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
@@ -746,16 +823,28 @@ await test('FindPollingWatcher fires when find signature changes', async () => {
 });
 
 await test('displayLearnerPath hides the physical save tree', () => {
-  const physical = '/home/student/.mlab-saves/hello-c/1.0.0/sha256-8468b2e6412650f97a3ad351eb73828fff25031abe4665938110d50f09c2e2c8/steps/01-first-program/files';
+  const physical = '/mlab/saves/hello-c/1.0.0/sha256-8468b2e6412650f97a3ad351eb73828fff25031abe4665938110d50f09c2e2c8/steps/01-first-program/files';
   assert.equal(displayLearnerPath(physical), '~/workspace');
   assert.equal(displayLearnerPath(`${physical}/test/c`), '~/workspace/test/c');
+  const legacy = '/home/student/.mlab-saves/hello-c/1.0.0/sha256-8468b2e6412650f97a3ad351eb73828fff25031abe4665938110d50f09c2e2c8/steps/01-first-program/files';
+  assert.equal(displayLearnerPath(legacy), '~/workspace');
   assert.equal(displayLearnerPath('/home/student/workspace'), '~/workspace');
   assert.equal(displayLearnerPath('/home/student/workspace/src/main.c'), '~/workspace/src/main.c');
   const env = learnerShellEnv();
   const ps1 = env.find(item => item.startsWith('PS1='));
   assert.ok(ps1, 'learner shell must set PS1');
   assert.ok(!ps1.includes('\\w'), 'PS1 must not use \\w (it prints the physical save path)');
-  assert.ok(ps1.includes('.mlab-saves'), 'PS1 must rewrite .mlab-saves paths');
+  assert.ok(ps1.includes('/mlab/saves'), 'PS1 must rewrite /mlab/saves paths');
+});
+
+await test('learner shell re-enters workspace through / after a retarget', () => {
+  assert.equal(reenterWorkspaceCommand(), 'cd / && cd -L /home/student/workspace');
+  const snippet = learnerProfileSnippet();
+  assert.ok(snippet.includes('cd / && cd -L /home/student/workspace'), 'must bounce through /; cd -L $PWD is a no-op');
+  assert.ok(snippet.includes("trap 'multilab_reenter_workspace' USR1"), 'open shells re-enter via SIGUSR1, not TTY injection');
+  assert.ok(snippet.includes('/tmp/multilab-shells'));
+  assert.ok(signalAttachedShellsScript().includes('kill -USR1'));
+  assert.ok(!snippet.includes('\\x15'), 'must not fake-type into the learner TTY');
 });
 
 await test('SaveService.loadStepState template inherit syncs into workspace', async () => {
@@ -788,6 +877,35 @@ await test('SaveService.saveStepState snapshots workspace into save dir', async 
       'utf8'
     );
     assert.equal(saved, 'changed\n');
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('copy strategy flushes live files to host save when switching steps', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-copy-switch-'));
+  try {
+    const { saveService, packageService, session } = createSaveService(tmp);
+    await saveService.loadStepState('hello-c', '01-first-program');
+    await session.writeFiles([
+      { name: 'hello.c', content: 'live-from-01\n' },
+      { name: 'scratch.txt', content: 'keep-me\n' },
+    ], { clear: true });
+    await saveService.loadStepState('hello-c', '02-args');
+    const cfg = await packageService.loadTutorial('hello-c');
+    const savedHello = await fs.readFile(
+      path.join(saveService.saveDir(cfg, '01-first-program'), 'hello.c'),
+      'utf8'
+    );
+    const savedScratch = await fs.readFile(
+      path.join(saveService.saveDir(cfg, '01-first-program'), 'scratch.txt'),
+      'utf8'
+    );
+    assert.equal(savedHello, 'live-from-01\n');
+    assert.equal(savedScratch, 'keep-me\n');
+    const live = await session.readFiles();
+    assert.ok(live.some(file => file.name === 'args.c'), 'step 02 live tree should be the new step');
+    assert.ok(!live.some(file => file.name === 'scratch.txt'), 'step 02 live tree should not keep step 01 scratch');
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

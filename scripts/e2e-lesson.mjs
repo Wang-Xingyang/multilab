@@ -232,6 +232,7 @@ await test('fs tree lists workspace files', async () => {
   for (const entry of body.entries) {
     const blob = `${entry.path || ''} ${entry.relative || ''} ${entry.name || ''}`;
     assert.ok(!blob.includes('.mlab-saves'), `file-tree leaked save path: ${blob}`);
+    assert.ok(!blob.includes('/mlab/saves'), `file-tree leaked save path: ${blob}`);
     assert.ok(!blob.includes('sha256-'), `file-tree leaked digest: ${blob}`);
   }
 });
@@ -264,6 +265,7 @@ await test('learner-visible cwd does not print the save digest path', async () =
   const pwd = (probe.stdout || '').trim();
   assert.ok(pwd, 'login shell PWD was empty');
   assert.ok(!pwd.includes('.mlab-saves'), `PWD leaked save tree: ${pwd}`);
+  assert.ok(!pwd.includes('/mlab/saves'), `PWD leaked save tree: ${pwd}`);
   assert.ok(!pwd.includes('sha256-'), `PWD leaked digest: ${pwd}`);
 });
 

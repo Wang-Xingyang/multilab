@@ -7,6 +7,7 @@ import {
   validateSafePath,
   validateWorkspaceRelPath,
 } from './PackageService.js';
+import { SAVES_BIND_TARGET } from '../workspace/WorkspaceStrategy.js';
 
 const UI_MAX_BYTES = 8192;
 
@@ -107,10 +108,13 @@ export class SaveService {
     const providedFiles = Array.isArray(files) ? files : null;
     const normalizedFiles = (providedFiles || []).map(f => normalizeWorkspaceEntry(f));
     await this.workspaceService.ensure({ tutorialId });
-    if (providedFiles) await this.workspaceService.writeFiles(normalizedFiles, { clear: false });
-    if (!this.workspaceService.usesHostBackedSave()) {
-      const workspaceFiles = await this.workspaceService.snapshot();
-      await writeHostFiles(dest, workspaceFiles);
+    const liveHost = this.workspaceService.attachedHostPath;
+    const savingLive = !liveHost || path.resolve(liveHost) === path.resolve(dest);
+    if (savingLive) {
+      if (providedFiles) await this.workspaceService.writeFiles(normalizedFiles, { clear: false });
+      await this.workspaceService.flushLiveToHost({ hostPath: dest, tutorialId });
+    } else if (providedFiles) {
+      await mergeHostFiles(dest, normalizedFiles);
     }
     const nextUi = ui !== undefined
       ? normalizeStepUi(ui, step)
@@ -164,7 +168,7 @@ export class SaveService {
       validateSafePath(stepId),
       'files',
     ].join('/');
-    return `/home/student/.mlab-saves/${rel}`;
+    return `${SAVES_BIND_TARGET}/${rel}`;
   }
 
   stepDir(cfg, stepId) {
@@ -258,6 +262,7 @@ export class SaveService {
     validateSafePath(tutorialKey);
     await this.ensureSaveRootDirs();
     const cfg = await this.packageService.loadTutorial(tutorialKey);
+    await this.workspaceService.flushLiveToHost();
     const metadata = await this.readSaveMetadata(cfg);
     const root = this.packageSaveRoot(cfg);
     const files = new Map();
@@ -456,6 +461,20 @@ async function collectSaveEntries(dir, relative, out) {
         language: LANG_BY_EXT[ext] || 'plaintext',
       });
     }
+  }
+}
+
+async function mergeHostFiles(dir, files) {
+  await fs.mkdir(dir, { recursive: true });
+  for (const f of files || []) {
+    const entry = normalizeWorkspaceEntry(f);
+    const dest = path.join(dir, ...entry.name.split('/'));
+    if (entry.type === 'dir') {
+      await fs.mkdir(dest, { recursive: true });
+      continue;
+    }
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.writeFile(dest, entry.content || '', 'utf8');
   }
 }
 
