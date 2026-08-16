@@ -9,6 +9,7 @@ There is no supported `tutorial.json` format.
 ```text
 tutorials/<id>/
   multilab.json
+  assets/                 # optional screenshots (png/jpeg/gif/webp/bmp)
   steps/
     01-<slug>/
       instructions.md
@@ -126,6 +127,35 @@ Current implementation does not overwrite learner files during `overlay_template
 
 Package template files are read-only learning material. Learner edits live in the workspace and persist into the save. Command scripts still run against the runtime workspace path (currently `/home/student/workspace` for Docker kernels).
 
+## Markdown And Assets
+
+`instructions.md` is rendered in the left tutorial panel.
+
+Supported content:
+
+- GFM Markdown (headings, lists, tables, quotes, emphasis, links, images, fenced code).
+- Restricted HTML through the player's sanitizer. Do not rely on `<script>`, `<iframe>`, `<form>`, inline SVG, or event-handler attributes; they are stripped.
+- Package-relative images: `png`, `jpeg`, `gif`, `webp`, `bmp`. SVG is not served.
+
+Image paths are resolved relative to the step directory first, then the package root:
+
+```text
+![Diagram](diagram.png)           # steps/<id>/diagram.png
+![Overview](assets/overview.png)  # <package>/assets/overview.png
+```
+
+Remote `http(s)` images are not loaded. Put screenshots in the package so the tutorial stays local-first.
+
+Fenced code blocks are copyable. Tag shell/command examples as `bash` (or `sh` / `console`) so they render as command blocks:
+
+```bash
+gcc /home/student/workspace/hello.c -o /tmp/a.out -Wall && /tmp/a.out
+```
+
+External `http(s)` and `mailto:` links open in a new tab. Do not use relative links to other package files as navigation; they are shown as text.
+
+The validator warns when Markdown images are missing, escape the package, use an unsupported type, or point at a remote URL.
+
 ## Commands
 
 Commands are declared in `multilab.json`; scripts live in real files.
@@ -197,6 +227,7 @@ Captured test commands pass when exit code is `0`.
 
 - Use `multilab.json`, never `tutorial.json`.
 - Keep instructions in `instructions.md`.
+- Keep images under `assets/` at the package root or next to `instructions.md`. Reference them with package- or step-relative paths, not `http(s)` URLs.
 - Keep editable starter files in `files/`.
 - Keep command scripts as real files referenced by manifest commands.
 - Do not inline instructions, source files, or scripts into the manifest.
@@ -223,6 +254,7 @@ The validator checks:
 - command types;
 - command script paths;
 - `inherit_mode`;
+- Markdown image paths (missing / escape / unsupported type / remote URL warnings);
 - common path and output mistakes.
 
 ## Packing

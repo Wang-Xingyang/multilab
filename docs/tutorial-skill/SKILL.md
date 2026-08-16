@@ -15,6 +15,7 @@ Do not generate `tutorial.json`.
 ```text
 tutorials/<id>/
   multilab.json
+  assets/
   steps/
     01-<slug>/
       instructions.md
@@ -108,6 +109,8 @@ Put compiled binaries and temporary files under `/tmp`.
 - Do not create `tutorial.json`.
 - Do not inline instructions, source files, or scripts in `multilab.json`.
 - Use real Markdown in `instructions.md`.
+- Put screenshots in `assets/` or beside `instructions.md`; use package-relative `png`/`jpeg`/`gif`/`webp`/`bmp` paths, not remote URLs.
+- Tag copyable shell examples as `bash` fences.
 - Use real editable files under `files/`.
 - Use command scripts referenced from `commands[]`.
 - Keep each step focused.

@@ -119,6 +119,13 @@ const catalog = {
     backendHint: '请确认后端服务运行在 http://localhost:{port}',
     unknownDir: '(未知)',
   },
+  content: {
+    copy: '复制',
+    copied: '已复制',
+    copyFailed: '复制失败',
+    code: '代码',
+    command: '命令',
+  },
   files: {
     openFailed: '打开文件失败: {error}',
     emptyWorkspace: '工作区为空',

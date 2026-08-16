@@ -36,7 +36,7 @@ The current code is still a compact prototype, but new work should follow this d
 Browser UI
   Monaco editor
   xterm.js terminal
-  tutorial Markdown
+  tutorial Markdown (`public/js/content-renderer.js`)
   editor-group tabs (files + preview / test-results / logs / diagnostics)
 
 Node host
@@ -94,7 +94,7 @@ tutorials/hello-c/
       test.sh
 ```
 
-Package loading is handled by `server/services/PackageService.js`. It owns package source resolution, manifest loading, deterministic package digest calculation, step content assembly, and command script lookup.
+Package loading is handled by `server/services/PackageService.js`. It owns package source resolution, manifest loading, deterministic package digest calculation, step content assembly, command script lookup, and tutorial-panel content assets (`resolveContentAsset`).
 
 The server loads a tutorial with this flow:
 
@@ -112,6 +112,37 @@ GET /api/tutorials/:source_key
 Development tutorials keep their original id as the source key, so `/api/tutorials/hello-c` continues to open `TUTORIALS_DIR/hello-c`. Installed packages use a digest-derived source key such as `pkg-<sha256hex>` to avoid collisions when multiple packages share the same manifest id.
 
 Scripts are not inlined into the API response. Execution endpoints ask `PackageService` to resolve and read the selected command script when invoked.
+
+## Tutorial Content Rendering
+
+The left tutorial panel is rendered by `public/js/content-renderer.js`, not by `tutorial-loader.js`. `tutorial-loader` still owns list/open/step navigation and passes `instructions.md` plus `source_key` / `step_id` into the renderer.
+
+```text
+instructions.md
+  marked (GFM)
+  DOMPurify allowlist (no script/iframe/form/svg/button)
+  rewrite <img src> to GET /api/tutorials/:source_key/assets?path=&step=
+  wrap <pre> with copy chrome (player UI, after sanitize)
+```
+
+Image rules:
+
+- Package-relative paths resolve first against `steps/<step-id>/`, then the package root. `./diagram.png` and `assets/overview.png` both work. `..` is allowed only while the result stays inside the package.
+- Allowed types: png, jpeg, gif, webp, bmp. SVG is not served (opening the asset URL as a document would run package script on the MultiLab origin).
+- Remote `http(s)` images are dropped (local-first; untrusted packages must not phone home via `<img>`).
+- Inline `data:image/png|jpeg|gif|webp;base64,...` is kept. Other `data:` / `javascript:` URLs are dropped.
+- Assets come from the tutorial package, never from the live workspace or host save.
+
+```text
+GET /api/tutorials/:source_key/assets?path=<authored-src>&step=<step-id>
+  PackageService.resolveContentAsset
+  Content-Type from extension
+  X-Content-Type-Options: nosniff
+```
+
+Fenced code blocks get a copy button. Fences tagged `bash` / `sh` / `shell` / `console` / `terminal` / `zsh` / `fish` are styled as command blocks. Copy is player chrome added after sanitize, so package HTML cannot inject those buttons. The tutorial panel allows text selection (`user-select: text`); the rest of the chrome stays unselectable.
+
+Restricted HTML in Markdown is allowed only through the DOMPurify allowlist (headings, lists, tables, links, images, `pre`/`code`, emphasis). `http(s)` and `mailto:` links open in a new tab with `rel="noopener noreferrer"`. Relative file links are unwrapped to text; they are not a second navigation surface.
 
 ## Packaging
 
@@ -423,5 +454,5 @@ The UI shows a kernel selector for compatible candidates and a "重连终端" bu
 - Kernel registry is static (Docker `gcc-ubuntu24-docker` and `gcc-ubuntu24-docker-net`).
 - Runtime selection follows resolved kernel plus optional per-package user preference.
 - Package library management covers list/detail/open/delete; bulk cleanup and save-linked cleanup are not implemented.
-- Panel declarations drive tutorial/terminal/file-tree visibility. `test-results` / `web-preview` open as editor tabs when declared. Logs and diagnostics are always on the right activity rail. The file-tree sits on the right of that rail with no FILES header. Learner-visible copy lives in `public/js/messages.js` (`t('group.key')`); static HTML uses `data-i18n*` filled by `applyStaticCopy()`. Progress UI reads `save.json` metadata from step APIs. Trust changes use a confirmation dialog. Frontend logic lives in `public/js/` ES modules without a bundler. Background long-running preview processes remain open; further live-web work is deprioritized in favor of HTML preview. There is no Settings view yet.
+- Panel declarations drive tutorial/terminal/file-tree visibility. `test-results` / `web-preview` open as editor tabs when declared. Logs and diagnostics are always on the right activity rail. The file-tree sits on the right of that rail with no FILES header. Learner-visible copy lives in `public/js/messages.js` (`t('group.key')`); static HTML uses `data-i18n*` filled by `applyStaticCopy()`. Tutorial Markdown is rendered by `public/js/content-renderer.js` (copyable fences, package-relative images, sanitized HTML). Progress UI reads `save.json` metadata from step APIs. Trust changes use a confirmation dialog. Frontend logic lives in `public/js/` ES modules without a bundler. Background long-running preview processes remain open; further live-web work is deprioritized in favor of HTML preview. Editor split groups (preview beside code) are not implemented yet. There is no Settings view yet.
 - The Docker container is single-session and intended for local single-user use.

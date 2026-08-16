@@ -9,6 +9,7 @@ There is no supported `tutorial.json` format.
 ```text
 tutorials/<id>/
   multilab.json
+  assets/
   steps/
     01-<slug>/
       instructions.md
@@ -154,6 +155,15 @@ Script paths must be relative to the tutorial root and must not escape the packa
   ]
 }
 ```
+
+## Markdown And Assets
+
+`instructions.md` is GFM Markdown. The player sanitizes HTML, makes fenced code copyable, and loads images from the package:
+
+- `![alt](assets/overview.png)` resolves at the package root, or `![alt](diagram.png)` next to the step.
+- Allowed image types: png, jpeg, gif, webp, bmp. Not SVG.
+- Remote `http(s)` images are not loaded.
+- Tag shell examples as `bash` so they render as copyable command blocks.
 
 ## Validation
 

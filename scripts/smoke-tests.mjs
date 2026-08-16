@@ -64,6 +64,11 @@ import {
 } from '../server/services/PreviewPortMap.js';
 import { t, getCatalog } from '../public/js/messages.js';
 import { normalizeProgress, stepIndexFromId } from '../public/js/progress.js';
+import {
+  rewriteAssetHref,
+  rewriteLinkHref,
+  isCommandLang,
+} from '../public/js/content-renderer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -329,6 +334,71 @@ await test('PackageService loads hello-c with ui_panels', async () => {
   assert.ok(tutorial.steps.length >= 1);
 });
 
+const PNG_1X1 = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64'
+);
+
+await test('PackageService.resolveContentAsset serves package images only', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-asset-'));
+  try {
+    const pkg = path.join(tmp, 'asset-lab');
+    await fs.mkdir(path.join(pkg, 'assets'), { recursive: true });
+    await fs.mkdir(path.join(pkg, 'steps', '01-intro'), { recursive: true });
+    await fs.writeFile(path.join(pkg, 'multilab.json'), JSON.stringify({
+      schema_version: 1,
+      id: 'asset-lab',
+      version: '1.0.0',
+      title: 'Asset lab',
+      description: 'fixture',
+      language: 'c',
+      steps: [{ id: '01-intro', title: 'Intro', inherit_mode: 'template', commands: [] }],
+    }));
+    await fs.writeFile(path.join(pkg, 'assets', 'dot.png'), PNG_1X1);
+    await fs.writeFile(path.join(pkg, 'steps', '01-intro', 'local.png'), PNG_1X1);
+    await fs.writeFile(path.join(pkg, 'assets', 'run.sh'), '#!/bin/bash\ntrue\n');
+    const packageService = new PackageService({ tutorialsDir: tmp });
+
+    const fromRoot = await packageService.resolveContentAsset('asset-lab', 'assets/dot.png');
+    assert.equal(fromRoot.contentType, 'image/png');
+    assert.equal(fromRoot.relPath, 'assets/dot.png');
+
+    const fromStep = await packageService.resolveContentAsset('asset-lab', 'local.png', {
+      stepId: '01-intro',
+    });
+    assert.equal(fromStep.relPath, 'steps/01-intro/local.png');
+
+    const viaStepFallback = await packageService.resolveContentAsset('asset-lab', 'assets/dot.png', {
+      stepId: '01-intro',
+    });
+    assert.equal(viaStepFallback.relPath, 'assets/dot.png');
+
+    const viaDotDot = await packageService.resolveContentAsset('asset-lab', '../../assets/dot.png', {
+      stepId: '01-intro',
+    });
+    assert.equal(viaDotDot.relPath, 'assets/dot.png');
+
+    await assert.rejects(
+      () => packageService.resolveContentAsset('asset-lab', '../../../etc/passwd'),
+      (error) => error.statusCode === 403 || error.statusCode === 400
+    );
+    await assert.rejects(
+      () => packageService.resolveContentAsset('asset-lab', 'https://evil.example/x.png'),
+      (error) => error.statusCode === 400
+    );
+    await assert.rejects(
+      () => packageService.resolveContentAsset('asset-lab', 'assets/run.sh'),
+      (error) => error.statusCode === 415
+    );
+    await assert.rejects(
+      () => packageService.resolveContentAsset('asset-lab', 'missing.png'),
+      (error) => error.statusCode === 404
+    );
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 await test('Save archive export/import roundtrip', async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-smoke-'));
   try {
@@ -434,6 +504,7 @@ await test('Frontend messages catalog resolves keys', () => {
   assert.equal(t('chrome.theme'), '切换主题');
   assert.ok(Object.keys(getCatalog().commands).length >= 5);
   assert.ok(Object.keys(getCatalog().chrome).length >= 5);
+  assert.equal(t('content.copy'), '复制');
   assert.equal(t('missing.key.not.real'), 'missing.key.not.real');
 });
 
@@ -1063,6 +1134,37 @@ await test('stepIndexFromId: returns index or -1', () => {
   assert.equal(stepIndexFromId(tut, ''), -1);
   assert.equal(stepIndexFromId(null, 's1'), -1);
   assert.equal(stepIndexFromId({ steps: [] }, 's1'), -1);
+});
+
+console.log('\n--- frontend content-renderer.js (pure helpers) ---');
+await test('rewriteAssetHref: package-relative images become asset API URLs', () => {
+  const ctx = { sourceKey: 'hello-c', stepId: '01-first-program' };
+  assert.equal(
+    rewriteAssetHref('assets/dot.png', ctx),
+    '/api/tutorials/hello-c/assets?path=assets%2Fdot.png&step=01-first-program'
+  );
+  assert.equal(
+    rewriteAssetHref('../../assets/dot.png', ctx),
+    '/api/tutorials/hello-c/assets?path=..%2F..%2Fassets%2Fdot.png&step=01-first-program'
+  );
+  assert.equal(rewriteAssetHref('https://evil.example/x.png', ctx), null);
+  assert.equal(rewriteAssetHref('javascript:alert(1)', ctx), null);
+  assert.equal(rewriteAssetHref('//cdn.example/x.png', ctx), null);
+  assert.match(rewriteAssetHref('data:image/png;base64,aaa', ctx), /^data:image\/png;base64,/);
+  assert.equal(rewriteAssetHref('data:text/html,<h1>x</h1>', ctx), null);
+});
+await test('rewriteLinkHref: keep http(s)/mailto/hash, drop relative files', () => {
+  assert.equal(rewriteLinkHref('#section'), '#section');
+  assert.equal(rewriteLinkHref('https://example.com/docs'), 'https://example.com/docs');
+  assert.equal(rewriteLinkHref('mailto:a@b.c'), 'mailto:a@b.c');
+  assert.equal(rewriteLinkHref('assets/notes.md'), null);
+  assert.equal(rewriteLinkHref('javascript:alert(1)'), null);
+});
+await test('isCommandLang: bash-family fences are commands', () => {
+  assert.equal(isCommandLang('bash'), true);
+  assert.equal(isCommandLang('console'), true);
+  assert.equal(isCommandLang('c'), false);
+  assert.equal(isCommandLang(''), false);
 });
 
 console.log('');

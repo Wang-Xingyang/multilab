@@ -31,6 +31,51 @@ EMOJI_RE = re.compile(
 )
 STEP_ID_RE = re.compile(r'^\d{2}-[a-z][a-z0-9-]*$')
 CHAIN_ID_RE = re.compile(r'^[a-z][a-z0-9-]*$')
+IMG_MD_RE = re.compile(r'!\[[^\]]*\]\(([^)]+)\)')
+IMG_HTML_RE = re.compile(r'<img\b[^>]*\bsrc=["\']([^"\']+)["\']', re.I)
+CONTENT_ASSET_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'}
+
+
+def looks_like_url(src):
+    return bool(re.match(r'^[a-zA-Z][a-zA-Z0-9+.-]*:', src) or src.startswith('//'))
+
+
+def check_instruction_assets(text, step_dir, tutorial_dir, step_id, warnings):
+    srcs = IMG_MD_RE.findall(text) + IMG_HTML_RE.findall(text)
+    for src in srcs:
+        src = src.strip()
+        if not src:
+            continue
+        if looks_like_url(src):
+            if src.startswith(('http://', 'https://', '//')):
+                warnings.append(
+                    f"step '{step_id}': remote image '{src}' will not be loaded "
+                    "(use a package-relative png/jpeg/gif/webp/bmp)"
+                )
+            continue
+        ext = Path(src.split('?', 1)[0]).suffix.lower()
+        if ext and ext not in CONTENT_ASSET_EXTS:
+            warnings.append(
+                f"step '{step_id}': image '{src}' uses unsupported type {ext} "
+                "(png/jpeg/gif/webp/bmp)"
+            )
+        escaped = False
+        found = False
+        for base in (step_dir, tutorial_dir):
+            candidate = (base / src).resolve()
+            try:
+                candidate.relative_to(tutorial_dir)
+            except ValueError:
+                warnings.append(f"step '{step_id}': image '{src}' escapes package directory")
+                escaped = True
+                break
+            if candidate.is_file():
+                found = True
+                break
+        if not escaped and not found:
+            warnings.append(
+                f"step '{step_id}': image '{src}' not found under step dir or package root"
+            )
 
 
 def check_no_emoji(text, label, errors):
@@ -136,6 +181,7 @@ def validate(tutorial_dir):
         else:
             text = instructions_path.read_text(encoding='utf-8')
             check_no_emoji(text, f"step '{step_id}' instructions.md", errors)
+            check_instruction_assets(text, step_dir, tutorial_dir, step_id, warnings)
             if len(text) > 3000:
                 warnings.append(f"step '{step_id}': instructions.md is long ({len(text)} chars), consider splitting")
 

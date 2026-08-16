@@ -16,6 +16,7 @@ import { applyPanelLayout, applyProgress, applyProgressToUi } from './panels.js'
 import { renderTrustButton, refreshKernelResolution } from './kernel.js';
 import { loadFilesIntoEditor, saveCurrentStep } from './files.js';
 import { handleError } from './errors.js';
+import { renderTutorialMarkdown } from './content-renderer.js';
 
 let lastRenderedStepId = null;
 export function renderTutorialStepText() {
@@ -26,7 +27,10 @@ export function renderTutorialStepText() {
     lastRenderedStepId = null;
     return;
   }
-  content.innerHTML = DOMPurify.sanitize(marked.parse(step.instructions || ''));
+  renderTutorialMarkdown(content, step.instructions || '', {
+    sourceKey: currentTutorialKey(),
+    stepId: step.id,
+  });
   // 仅在 step 真正变化时触发淡入动画。enterStep 会调用两次 renderTutorialStepText
   // (loading 前 + loaded 后), 同 step 重复触发 opacity 动画会造成正文闪烁。
   if (lastRenderedStepId !== step.id) {

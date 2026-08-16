@@ -411,6 +411,22 @@ app.post(
   }
 );
 
+// Tutorial Markdown images (package-relative). Not workspace files.
+app.get('/api/tutorials/:id/assets', async (req, res) => {
+  try {
+    const relPath = req.query.path;
+    if (!relPath) return res.status(400).json({ error: 'path required' });
+    const stepId = typeof req.query.step === 'string' && req.query.step ? req.query.step : undefined;
+    const asset = await packageService.resolveContentAsset(req.params.id, relPath, { stepId });
+    res.setHeader('Content-Type', asset.contentType);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.sendFile(asset.absPath);
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message });
+  }
+});
+
 // 单个教程详情 — 返回组装后的完整内容
 app.get('/api/tutorials/:id', async (req, res) => {
   try {

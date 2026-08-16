@@ -13,6 +13,18 @@ const MANIFEST_FILE = 'multilab.json';
 const VALID_INHERIT_MODES = new Set(['template', 'previous_save', 'overlay_template']);
 const INSTALLED_SOURCE_PREFIX = 'pkg-';
 
+/** Tutorial Markdown images only. SVG is omitted: opening the asset URL as a
+ *  document would run package SVG script as the MultiLab origin. */
+export const CONTENT_ASSET_MIME = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+};
+export const MAX_CONTENT_ASSET_BYTES = 5 * 1024 * 1024;
+
 export function validateId(id) {
   if (!id || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$/.test(id)) {
     throw Object.assign(new Error('Invalid identifier'), { statusCode: 400 });
@@ -73,10 +85,20 @@ function validatePackageRelativePath(relPath) {
 function resolvePackagePath(tutorialDir, relPath) {
   const safeRel = validatePackageRelativePath(relPath);
   const resolved = path.resolve(tutorialDir, safeRel);
-  if (resolved !== tutorialDir && !resolved.startsWith(tutorialDir + path.sep)) {
+  if (!isInsideDir(tutorialDir, resolved)) {
     throw Object.assign(new Error('Package path escapes tutorial directory'), { statusCode: 403 });
   }
   return resolved;
+}
+
+function isInsideDir(root, candidate) {
+  const rel = path.relative(root, candidate);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+function isContentAssetUrl(relPath) {
+  const raw = String(relPath || '').trim();
+  return !raw || raw.includes('\0') || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw) || raw.startsWith('//');
 }
 
 async function pathExists(filePath) {
@@ -265,6 +287,63 @@ export class PackageService {
       }));
     }
     return cfg;
+  }
+
+  /**
+   * Resolve a tutorial-panel image from the package (not the live workspace).
+   * `relPath` is the Markdown/HTML src as authored. When `stepId` is set,
+   * resolve relative to `steps/<stepId>/` first, then the package root so
+   * both `./diagram.png` and `assets/foo.png` work.
+   */
+  async resolveContentAsset(tutorialKey, relPath, { stepId } = {}) {
+    const raw = String(relPath || '').trim().replace(/\\/g, '/');
+    if (isContentAssetUrl(raw) || path.isAbsolute(raw)) {
+      throw Object.assign(new Error('Invalid content asset path'), { statusCode: 400 });
+    }
+
+    const source = await this.resolvePackageSource(tutorialKey);
+    const tutorialDir = source.tutorialDir;
+    const bases = [];
+    if (stepId) {
+      validateSafePath(stepId);
+      bases.push(path.join(tutorialDir, 'steps', stepId));
+    }
+    bases.push(tutorialDir);
+
+    let lastDeniedType = false;
+    for (const base of bases) {
+      const absPath = path.resolve(base, raw);
+      if (!isInsideDir(tutorialDir, absPath)) {
+        throw Object.assign(new Error('Content asset path escapes package directory'), { statusCode: 403 });
+      }
+      let st;
+      try {
+        st = await fs.stat(absPath);
+      } catch {
+        continue;
+      }
+      if (!st.isFile()) continue;
+      const ext = path.extname(absPath).toLowerCase();
+      const contentType = CONTENT_ASSET_MIME[ext];
+      if (!contentType) {
+        lastDeniedType = true;
+        continue;
+      }
+      if (st.size > MAX_CONTENT_ASSET_BYTES) {
+        throw Object.assign(new Error('Content asset too large'), { statusCode: 413 });
+      }
+      return {
+        absPath,
+        contentType,
+        bytes: st.size,
+        relPath: path.relative(tutorialDir, absPath).split(path.sep).join('/'),
+      };
+    }
+
+    throw Object.assign(
+      new Error(lastDeniedType ? 'Unsupported content asset type' : 'Content asset not found'),
+      { statusCode: lastDeniedType ? 415 : 404 }
+    );
   }
 
   async getStepCommandScript(tutorialKey, stepId, commandIdOrType) {
