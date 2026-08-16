@@ -24,6 +24,8 @@ export const state = {
   fileTreeFetching: false,
   fileTreeActivePath: null,
   fileTreeCollapsed: false,
+  tutorialCollapsed: (typeof localStorage !== 'undefined' && localStorage.getItem('ml-tutorial-collapsed') === '1'),
+  previewForcedOpen: false,
 };
 
 export const FALLBACK_PANELS = [

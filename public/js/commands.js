@@ -9,7 +9,6 @@ import {
   showTestResults,
   showPreviewContent,
   revealAuxPanel,
-  panelDeclared,
 } from './panels.js';
 import { saveCurrentStep, refreshFileTree } from './files.js';
 
@@ -90,11 +89,9 @@ export async function runPreview() {
         step: step.id,
         command: command.id || command.type,
       }));
-      if (panelDeclared('web-preview')) {
-        document.getElementById('pane-web-preview').innerHTML =
-          `<div class="aux-empty"><span>${t('commands.previewInteractiveHint')}</span></div>`;
-        revealAuxPanel('web-preview');
-      }
+      document.getElementById('pane-web-preview').innerHTML =
+        `<div class="aux-empty"><span>${t('commands.previewInteractiveHint')}</span></div>`;
+      revealAuxPanel('web-preview');
       toast(t('commands.previewStarted'));
       return;
     }

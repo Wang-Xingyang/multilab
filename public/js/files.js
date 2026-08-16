@@ -131,7 +131,12 @@ function renderFileTabs() {
     fragment.appendChild(tab);
   });
   appendViewTabs(fragment);
-  container.appendChild(fragment);
+  const treeBtn = document.getElementById('tab-show-tree-btn');
+  if (treeBtn && treeBtn.parentElement === container) {
+    container.insertBefore(fragment, treeBtn);
+  } else {
+    container.appendChild(fragment);
+  }
 }
 
 setViewTabsChangedHandler(renderFileTabs);

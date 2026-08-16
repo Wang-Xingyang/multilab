@@ -1,11 +1,15 @@
 import {
   state,
   FALLBACK_PANELS,
+  currentStepObj,
+  stepCommand,
 } from './state.js';
 import { t } from './messages.js';
 import { apiGet } from './api.js';
 import { normalizeProgress, renderProgressStrip } from './progress.js';
 import { openEditorView, setViewOpenGuard } from './editor-views.js';
+import { openHostDrawer } from './host-drawer.js';
+import { applyPreviewSplit } from './layout.js';
 
 const panelHooks = {
   selectStep: null,
@@ -33,15 +37,27 @@ function panelDeclared(type) {
   return Boolean(panelDecl(type));
 }
 
-setViewOpenGuard((id) => id === 'logs' || id === 'diagnostics' || panelDeclared(id));
+setViewOpenGuard((id) => panelDeclared(id));
 
 function applyProgressToUi() {
   renderProgressStrip(state.currentTutorial, state.currentProgress, {
     currentStepIndex: state.currentStep,
-    onSelectStep: (index) => {
-      if (index !== state.currentStep) panelHooks.selectStep?.(index);
-    },
   });
+}
+
+function applyStepCommands() {
+  const step = currentStepObj();
+  const setShown = (id, shown) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = shown ? '' : 'none';
+  };
+  setShown('run-btn', Boolean(stepCommand(step, 'run')));
+  setShown('test-btn', Boolean(stepCommand(step, 'test')));
+  setShown('preview-btn', Boolean(stepCommand(step, 'preview')));
+  const terminal = panelDecl('terminal');
+  setShown('interrupt-btn', Boolean(terminal && !terminal.hidden));
+  const editor = panelDecl('editor');
+  setShown('revert-btn', Boolean(editor && !editor.hidden));
 }
 
 function applyProgress(progress) {
@@ -54,15 +70,33 @@ function applyPanelLayout() {
   const tutorial = panelDecl('tutorial');
   const terminal = panelDecl('terminal');
   const fileTree = panelDecl('file-tree');
+  const editor = panelDecl('editor');
+  const preview = panelDecl('web-preview');
 
-  const showTutorial = Boolean(tutorial && !tutorial.hidden);
+  const packageShowsTutorial = Boolean(tutorial && !tutorial.hidden);
+  const userCollapsed = Boolean(state.tutorialCollapsed);
+  const showTutorial = packageShowsTutorial && !userCollapsed;
+  const showEditor = Boolean(editor && !editor.hidden);
+  const showPreview = Boolean((preview && !preview.hidden) || state.previewForcedOpen);
   const showTerminal = !terminal || !terminal.hidden;
-  const showFileTree = Boolean(fileTree && !fileTree.hidden);
+  const showFileTree = Boolean(showEditor && fileTree && !fileTree.hidden);
 
+  document.body.classList.toggle('tutorial-collapsed', userCollapsed && packageShowsTutorial);
   document.getElementById('tutorial-panel').style.display = showTutorial ? '' : 'none';
   document.getElementById('drag-v').style.display = showTutorial ? '' : 'none';
+  document.getElementById('editor-column').style.display = showEditor ? '' : 'none';
+  document.getElementById('preview-column').classList.toggle('visible', showPreview);
+  const dragPreview = document.getElementById('drag-v-preview');
+  if (dragPreview) dragPreview.style.display = (showEditor && showPreview) ? '' : 'none';
   document.getElementById('terminal-wrap').style.display = showTerminal ? '' : 'none';
   document.getElementById('drag-h').style.display = showTerminal ? '' : 'none';
+
+  const collapseBtn = document.getElementById('toggle-tutorial-btn');
+  if (collapseBtn) {
+    collapseBtn.style.display = packageShowsTutorial ? '' : 'none';
+    collapseBtn.classList.toggle('is-open', userCollapsed && packageShowsTutorial);
+    collapseBtn.setAttribute('aria-pressed', userCollapsed ? 'true' : 'false');
+  }
 
   const treePanel = document.getElementById('file-tree-panel');
   const dragTree = document.getElementById('drag-v-tree');
@@ -72,7 +106,7 @@ function applyPanelLayout() {
   dragTree.style.display = (showFileTree && !treeCollapsed) ? '' : 'none';
   const treeToggle = document.getElementById('tab-show-tree-btn');
   if (treeToggle) {
-    treeToggle.style.display = showFileTree ? '' : 'none';
+    treeToggle.style.display = showFileTree ? 'flex' : 'none';
     treeToggle.classList.toggle('is-open', showFileTree && !treeCollapsed);
     treeToggle.title = t('files.treeTitle');
     treeToggle.setAttribute('aria-label', t('files.toggleTree'));
@@ -83,12 +117,10 @@ function applyPanelLayout() {
     if (!body.querySelector('.file-tree-item')) panelHooks.refreshTree?.(false);
   }
 
-  const logsBtn = document.getElementById('logs-btn');
-  const diagBtn = document.getElementById('diag-btn');
-  if (logsBtn) logsBtn.classList.toggle('is-open', state.activeViewId === 'logs');
-  if (diagBtn) diagBtn.classList.toggle('is-open', state.activeViewId === 'diagnostics');
-
+  applyPreviewSplit();
+  applyStepCommands();
   applyProgressToUi();
+  if (state.editor) state.editor.layout();
 }
 
 export function setFileTreeCollapsed(collapsed) {
@@ -102,7 +134,25 @@ export function toggleFileTree() {
   setFileTreeCollapsed(!state.fileTreeCollapsed);
 }
 
+export function toggleTutorialCollapsed() {
+  state.tutorialCollapsed = !state.tutorialCollapsed;
+  try {
+    localStorage.setItem('ml-tutorial-collapsed', state.tutorialCollapsed ? '1' : '0');
+  } catch { /* ignore quota */ }
+  applyPanelLayout();
+  if (state.fitAddon) state.fitAddon.fit();
+}
+
 function revealAuxPanel(tab) {
+  if (tab === 'web-preview') {
+    state.previewForcedOpen = true;
+    applyPanelLayout();
+    return;
+  }
+  if (tab === 'logs' || tab === 'diagnostics') {
+    openHostDrawer();
+    return;
+  }
   openEditorView(tab);
 }
 
@@ -208,7 +258,7 @@ async function showPreviewContent(result) {
     pre.textContent = output || t('preview.empty');
     pane.appendChild(pre);
   }
-  if (panelDeclared('web-preview')) revealAuxPanel('web-preview');
+  revealAuxPanel('web-preview');
 }
 
 
@@ -219,6 +269,7 @@ export {
   applyProgressToUi,
   applyProgress,
   applyPanelLayout,
+  applyStepCommands,
   revealAuxPanel,
   showTestResults,
   renderPreviewFrame,

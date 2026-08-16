@@ -2,22 +2,21 @@ import { state, currentTutorialKey } from './state.js';
 import { t, applyStaticCopy } from './messages.js';
 import { toast } from './ui.js';
 import { initTheme } from './theme.js';
-import { renderTrustButton, selectKernelFromUi } from './kernel.js';
+import { renderTrustButton } from './kernel.js';
 import { initLayout } from './layout.js';
 import { initTerminal, initWS, reconnectWS, setFileTreeChangeCallback } from './terminal.js';
 import {
-  revealAuxPanel,
   setPanelHooks,
   toggleFileTree,
+  toggleTutorialCollapsed,
+  applyPanelLayout,
 } from './panels.js';
+import { initHostDrawer, closeHostDrawer, toggleHostDrawer } from './host-drawer.js';
 import {
   loadTutorialList,
   enterStep,
-  openLibraryPanel,
-  closeLibraryPanel,
-  loadLibraryList,
-  openLibraryPackage,
-  deleteLibraryPackage,
+  initTutorialPicker,
+  closeTutorialPicker,
   pickLocalFile,
   openPackageFromFile,
   exportSaveDownload,
@@ -39,6 +38,9 @@ import { refreshDiagnosticsPane } from './diagnostics.js';
 
 initTheme();
 initLayout();
+initHostDrawer();
+initTutorialPicker();
+applyPanelLayout();
 initTerminal();
 initWS();
 
@@ -57,6 +59,7 @@ function setupMenu(menuEl) {
   trigger.addEventListener('click', (e) => {
     e.stopPropagation();
     document.querySelectorAll('.menu.open').forEach(m => { if (m !== menuEl) m.classList.remove('open'); });
+    closeTutorialPicker();
     menuEl.classList.toggle('open');
   });
   menuEl.querySelectorAll('.menu-pop button').forEach(btn => {
@@ -139,14 +142,15 @@ bootEditor();
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); runCode(); }
   if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveFile(); }
-  // Escape 关闭任意打开的浮层 (文件选择器 / 教程库 / 信任对话框)
+  // Escape 关闭任意打开的浮层 (文件选择器 / 教程目录 / 信任对话框 / 抽屉)
   if (e.key === 'Escape') {
     const pick = document.getElementById('file-picker-overlay');
-    const lib = document.getElementById('library-overlay');
     const trust = document.getElementById('trust-overlay');
+    const drawer = document.getElementById('host-drawer');
     if (pick?.style.display === 'block') { closeFilePicker(); e.preventDefault(); }
-    else if (lib?.style.display === 'block') { closeLibraryPanel(); e.preventDefault(); }
+    else if (document.getElementById('tutorial-picker')?.classList.contains('open')) { closeTutorialPicker(); e.preventDefault(); }
     else if (trust?.style.display === 'block') { closeTrustDialog(); e.preventDefault(); }
+    else if (drawer?.classList.contains('open')) { closeHostDrawer(); e.preventDefault(); }
   }
 });
 document.getElementById('run-btn').onclick = runCode;
@@ -161,25 +165,9 @@ document.getElementById('file-picker-overlay').addEventListener('click', (e) => 
 });
 document.getElementById('file-picker-close-btn').addEventListener('click', closeFilePicker);
 document.getElementById('picker-refresh-btn').addEventListener('click', () => loadFilePickerList(true));
-document.getElementById('kernel-select').addEventListener('change', selectKernelFromUi);
 document.getElementById('reconnect-btn').addEventListener('click', () => {
   reconnectWS({ reason: 'manual' });
   toast(t('ws.reconnecting'));
-});
-document.getElementById('library-btn').addEventListener('click', openLibraryPanel);
-document.getElementById('library-refresh-btn').addEventListener('click', loadLibraryList);
-document.getElementById('library-close-btn').addEventListener('click', closeLibraryPanel);
-document.getElementById('library-overlay').addEventListener('click', (e) => {
-  if (e.target === e.currentTarget) closeLibraryPanel();
-});
-document.getElementById('library-list').addEventListener('click', (e) => {
-  const btn = e.target.closest('button[data-action]');
-  if (!btn) return;
-  const packages = document.getElementById('library-list')._packages || [];
-  const pkg = packages[Number(btn.dataset.idx)];
-  if (!pkg) return;
-  if (btn.dataset.action === 'open') openLibraryPackage(pkg);
-  if (btn.dataset.action === 'delete') deleteLibraryPackage(pkg);
 });
 document.getElementById('import-package-btn').addEventListener('click', () => pickLocalFile('import-package-file'));
 document.getElementById('import-package-file').addEventListener('change', (e) => openPackageFromFile(e.target.files?.[0]));
@@ -187,15 +175,12 @@ document.getElementById('export-save-btn').addEventListener('click', exportSaveD
 document.getElementById('import-save-btn').addEventListener('click', () => pickLocalFile('import-save-file'));
 document.getElementById('import-save-file').addEventListener('change', (e) => importSaveFromFile(e.target.files?.[0]));
 document.getElementById('trust-btn').addEventListener('click', () => openTrustDialog(state.currentTutorial));
-document.getElementById('logs-btn').addEventListener('click', () => {
-  revealAuxPanel('logs');
-});
 document.getElementById('diag-btn').addEventListener('click', () => {
-  revealAuxPanel('diagnostics');
+  toggleHostDrawer();
 });
-document.getElementById('save-btn').addEventListener('click', saveFile);
 document.getElementById('revert-btn').addEventListener('click', resetCurrentStep);
 document.getElementById('test-btn').addEventListener('click', runTest);
+document.getElementById('toggle-tutorial-btn').addEventListener('click', toggleTutorialCollapsed);
 document.getElementById('prev-step').onclick = () => {
   if (state.currentStep > 0) enterStep(state.currentStep - 1);
 };

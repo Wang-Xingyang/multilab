@@ -3,20 +3,21 @@
  *
  * Owns: tutorial list, tutorial detail load, step enter/render.
  * Depends on files.js (load/save step) — one direction only.
- * library.js and save-io.js depend on this module (loadTutorialList),
- * never the reverse.
+ * library.js owns the catalog picker and lazily imports this module
+ * for loadTutorialList / loadTutorial so there is no import cycle.
  */
-import { state, currentStepObj, currentTutorialKey, stepCommand } from './state.js';
+import { state, currentStepObj, currentTutorialKey } from './state.js';
 import { apiJson, apiGet } from './api.js';
 import { toast, status, escapeAttr } from './ui.js';
 import { t } from './messages.js';
 import { appendSessionLog } from './session-log.js';
 import { normalizeProgress, stepIndexFromId } from './progress.js';
-import { applyPanelLayout, applyProgress, applyProgressToUi } from './panels.js';
+import { applyPanelLayout, applyProgress, applyProgressToUi, applyStepCommands } from './panels.js';
 import { renderTrustButton, refreshKernelResolution } from './kernel.js';
 import { loadFilesIntoEditor, saveCurrentStep } from './files.js';
 import { handleError } from './errors.js';
 import { renderTutorialMarkdown } from './content-renderer.js';
+import { renderCatalog, setCatalogLabel } from './library.js';
 
 let lastRenderedStepId = null;
 export function renderTutorialStepText() {
@@ -41,16 +42,26 @@ export function renderTutorialStepText() {
     content.classList.remove('step-enter');
   }
   lastRenderedStepId = step.id;
-  document.getElementById('test-btn').style.display = stepCommand(step, 'test') ? '' : 'none';
-  document.getElementById('preview-btn').style.display = stepCommand(step, 'preview') ? '' : 'none';
+  applyStepCommands();
 }
 
 export async function loadTutorialList(opts = {}) {
   try {
     const { tutorials, expectedDir } = await apiGet('/api/tutorials');
-    const sel = document.getElementById('tutorial-select');
+    const currentKey = state.currentTutorial?.source_key || state.currentTutorial?.id;
+    const selected = tutorials.find(tu => {
+      const sourceKey = tu.source_key || tu.id;
+      if (opts.preferredKey && sourceKey === opts.preferredKey) return true;
+      if (opts.preferredDigest && tu.package_digest === opts.preferredDigest) {
+        return !opts.preferredSourceType || tu.source_type === opts.preferredSourceType;
+      }
+      return false;
+    }) || tutorials.find(tu => (tu.source_key || tu.id) === currentKey) || tutorials[0];
+    const selectedKey = selected ? (selected.source_key || selected.id) : '';
+    renderCatalog(tutorials, { expectedDir, selectedKey });
+
     if (tutorials.length === 0) {
-      sel.innerHTML = `<option value="">${t('tutorial.selectPlaceholder')}</option>`;
+      setCatalogLabel(null);
       document.getElementById('tutorial-content').innerHTML =
         `<div class="tutorial-placeholder">
           <div class="ph-title">${t('tutorial.emptyTitle')}</div>
@@ -64,25 +75,13 @@ export async function loadTutorialList(opts = {}) {
       document.getElementById('loading-msg').style.display = 'none';
       return;
     }
-    sel.innerHTML = tutorials.map(tu => {
-      const sourceKey = tu.source_key || tu.id;
-      const sourceLabel = tu.source_type === 'installed' ? 'imported' : 'dev';
-      return `<option value="${escapeAttr(sourceKey)}">${escapeAttr(tu.title)} (${escapeAttr(tu.language)}, ${tu.steps} ${t('tutorial.stepsSuffix')}, ${sourceLabel})</option>`;
-    }).join('');
-    sel.onchange = () => loadTutorial(sel.value);
-    const selected = tutorials.find(tu => {
-      const sourceKey = tu.source_key || tu.id;
-      if (opts.preferredKey && sourceKey === opts.preferredKey) return true;
-      if (opts.preferredDigest && tu.package_digest === opts.preferredDigest) {
-        return !opts.preferredSourceType || tu.source_type === opts.preferredSourceType;
-      }
-      return false;
-    }) || tutorials[0];
-    const selectedKey = selected.source_key || selected.id;
-    sel.value = selectedKey;
+
+    setCatalogLabel(selected);
+    if (opts.refreshOnly && selectedKey && selectedKey === currentKey) return;
     loadTutorial(selectedKey);
   } catch (e) {
     handleError(e, { feature: 'tutorial' });
+    setCatalogLabel(null);
     document.getElementById('tutorial-content').innerHTML =
       `<div class="tutorial-placeholder error">
         <div class="ph-title">${t('tutorial.listFailedTitle')}</div>
@@ -97,11 +96,13 @@ export async function loadTutorial(id) {
     if (state.currentTutorial) await saveCurrentStep({ silent: true, force: true });
     state.currentTutorial = await apiGet(`/api/tutorials/${encodeURIComponent(id)}`);
     if (!state.currentTutorial || !state.currentTutorial.steps?.length) throw new Error(t('tutorial.invalidData'));
+    state.previewForcedOpen = false;
     state.currentProgress = normalizeProgress(state.currentTutorial.progress || null);
     applyPanelLayout();
     renderTrustButton();
     await refreshKernelResolution();
     appendSessionLog(t('tutorial.openLog', { id: state.currentTutorial.id || id }));
+    setCatalogLabel(state.currentTutorial);
     // 直接从 tutorial detail 的 progress resume current_step。
     // 不要先 load step 0 探测: loadStepState 会 recordStepVisit, 把 current_step 覆盖成 0。
     const resumeStepId = state.currentTutorial.progress?.current_step;

@@ -39,6 +39,8 @@ Recommended:
 - `security`
 - `default_panels`
 
+`default_panels` names which windows the package needs (`tutorial`, `editor`, `terminal`, `web-preview`, `file-tree`, `test-results`). It does not set geometry. The player auto-layouts: tutorial nailed left, editor and preview side by side when both are needed, terminal at the bottom of the work area, file-tree as an editor accessory. Logs and diagnostics are host chrome, not package windows. `area` is stored for compatibility and ignored.
+
 ## Runtime Requirements
 
 Example:

@@ -15,10 +15,10 @@ This repository is an early prototype of the MultiLab host:
 - package sources: development directories under `TUTORIALS_DIR` and imported packages under `.multilab-state/packages/`;
 - command model: manifest-declared `commands[]` with script files;
 - security: digest-keyed trust store (default `untrusted`) and command-time security policy gates;
-- kernels/runtime: static `KernelRegistry` with offline `gcc-ubuntu24-docker` and networked `gcc-ubuntu24-docker-net` (localhost port publish); `RuntimeManager` binds the selected kernel to Docker and applies network/sandbox/port settings; UI can pick a compatible kernel and reconnect the terminal;
+- kernels/runtime: static `KernelRegistry` with offline `gcc-ubuntu24-docker` and networked `gcc-ubuntu24-docker-net` (localhost port publish); `RuntimeManager` binds the resolved kernel to Docker and applies network/sandbox/port settings; the player auto-matches a kernel (reconnect and trust live in the diagnostics drawer);
 - saves: versioned step files plus `save.json` progress metadata under `.multilab-state/saves/` (host save is durable truth for all steps);
 - workspace: `WorkspaceService` syncs **only the current step** into the lab; Linux ext4 bind-mounts the host save tree at `/mlab/saves` and retargets `/home/student/workspace`; Windows copies that step and flushes it back on save/switch/export;
-- panels: manifest `default_panels` drive tutorial/terminal/file-tree visibility; test-results/web-preview/logs/diagnostics open as editor tabs next to files; tutorial Markdown is sanitized and copyable, with package-relative images; progress strip uses `save.json`; trust changes go through a confirmation dialog;
+- panels: packages declare primitives (`tutorial` / `editor` / `terminal` / `web-preview` / `file-tree`); the player auto-layouts (tutorial left, editor | preview, terminal bottom); logs and diagnostics are one host drawer (no inner tabs); tutorial Markdown is sanitized and copyable, with package-relative images; the bottom bar shows `n / total · title` from `save.json`; trust changes go through a confirmation dialog;
 - checks: `npm run test:smoke` runs a Docker-free service smoke suite.
 
 The long-term product direction is documented in:
@@ -134,7 +134,7 @@ Imported `.mlab` packages are unpacked under:
 .multilab-state/packages/<id>/<version>/<digest>/unpacked/
 ```
 
-They appear in `/api/tutorials` with a digest-derived `source_key` such as `pkg-<sha256hex>`. The UI "打开 .mlab" button uploads a browser-selected file to `POST /api/packages/upload`, imports it into the library, and opens it. The "教程库" panel lists installed packages (version/digest/source) and can open or delete them. Host-path import via `POST /api/packages/import` remains available for automation.
+They appear in `/api/tutorials` with a digest-derived `source_key` such as `pkg-<sha256hex>`. The tutorial catalog picker lists development and imported packages together; the popover is capped (`max-height: min(70vh, 420px)`) and the list scrolls, with 「打开 .mlab」 pinned at the bottom. Imported rows can be deleted. Host-path import via `POST /api/packages/import` remains available for automation.
 
 Trust is keyed by package digest and defaults to `untrusted`. The UI opens a confirmation dialog before changing `untrusted` / `user-trusted` through `/api/trust`. Command execution is gated by `SecurityPolicyService`: untrusted or sandbox-required packages need a sandbox-capable kernel, and network-disabled packages require a kernel with `network_default: none`.
 

@@ -37,7 +37,8 @@ Browser UI
   Monaco editor
   xterm.js terminal
   tutorial Markdown (`public/js/content-renderer.js`)
-  editor-group tabs (files + preview / test-results / logs / diagnostics)
+  auto-layout work area (tutorial | editor | preview, terminal bottom)
+  host drawer (logs / diagnostics)
 
 Node host
   Express APIs
@@ -79,8 +80,10 @@ Captured command scripts are uploaded through `RuntimeSession.tempScriptPath()` 
 
 Each tutorial source must contain `multilab.json`. The current host supports two source types:
 
-- `development`: an authoring directory under `TUTORIALS_DIR/<id>`.
-- `installed`: an imported package under `.multilab-state/packages/<id>/<version>/<digest>/unpacked/`.
+- `development`: an authoring directory under `TUTORIALS_DIR/<id>`. This is the live writing path (hello-c in this workspace), not a test stub.
+- `installed`: an imported `.mlab` under `.multilab-state/packages/<id>/<version>/<digest>/unpacked/`. This is what a learner (and a shipped tutorial) typically opens.
+
+The player lists both. A learner-only install can point `TUTORIALS_DIR` at an empty folder so the catalog is import-only. Authors keep a development directory so they can edit Markdown and files without packing a `.mlab` on every change.
 
 ```text
 tutorials/hello-c/
@@ -186,7 +189,7 @@ GET  /api/packages/item?id&version&digest   # package detail
 DELETE /api/packages/item?id&version&digest # remove installed package
 ```
 
-The UI "打开 .mlab" button uses browser file picker upload, imports into the package library, then opens the installed source by digest. The "教程库" panel lists installed packages with version/digest/source, and supports open/delete. Deleting a package does not delete learner saves. Host-path import remains available for API/automation.
+The tutorial catalog is one control: the current-tutorial button opens a list of development and imported packages (`GET /api/tutorials`). "打开 .mlab" sits in that list's footer (`POST /api/packages/upload`). Imported rows can be deleted (`DELETE /api/packages/item`); learner saves are kept. Progress import/export is a separate control because it belongs to the open tutorial, not the catalog. Host-path import remains available for API/automation.
 
 Imported packages are now included in `/api/tutorials` alongside development tutorials and can be opened by the player through their `source_key`.
 
@@ -251,15 +254,22 @@ The old `/api/test` and WebSocket `type: "run"` paths have been removed.
 
 `PackageService` normalizes `default_panels` into `ui_panels` through `PanelModel`. Unknown panel types are dropped so packages cannot inject arbitrary host UI.
 
+Packages declare **which primitives they need**, not window geometry. The player auto-layouts. `public/index.html` is the layout source of truth.
+
 Current UI behavior:
 
-- `tutorial` / `terminal` visibility follows the normalized panel list;
-- `test-results` / `web-preview` / `logs` / `diagnostics` open as editor-group tabs next to file tabs (even if the panel starts `hidden`). Split editor groups (preview beside code) are not implemented yet. Logs and diagnostics are also always available from the right activity rail, without requiring a tutorial panel declaration;
-- `web-preview` opens that tab for `type: "preview"` commands;
+- One player top bar: brand and tutorial-collapse on the left; tutorial catalog (current tutorial + all packages + open `.mlab`) and current-tutorial progress; diagnostics and theme on the right. Logs live inside the diagnostics drawer. No kernel picker, no trust badge, and no step commands in the header.
+- Tutorial is nailed left and collapsible. Packages cannot move it. `area` on panel objects is stored for compatibility and ignored for geometry.
+- Editor and preview are optional peer columns (side by side when both are needed). Preview is an observation panel, not a file tab. Declaring `web-preview` (and not `hidden`) shows the column; a `type: "preview"` command also opens it.
+- Terminal stays at the bottom of the work area, never a third column.
+- File-tree is an editor accessory, toggled from the editor tab strip. There is no FILES header and no activity rail.
+- `test-results` still opens as an editor tab when declared.
+- Logs and diagnostics are one host drawer opened from a single 诊断 button. The drawer is one scroll: trust / kernel / reconnect, then session logs. No inner tabs.
+- Bottom bar: fixed-width prev/next on the left, `n / total · title` in the middle (ellipsis, must not push the buttons), current-step commands on the right (run / test / preview / reset, plus interrupt when a terminal is shown). No step-dot strip. Command buttons follow the current step's `commands[]`, not which windows exist.
 - captured preview output may include `MULTILAB_PREVIEW_HTML` or HTML body for sandboxed `iframe.srcdoc` rendering;
 - `MULTILAB_PREVIEW_URL=...` is rewritten to a host-local mapped URL when the active Docker kernel publishes that container port (`publish_ports`, bound to `127.0.0.1`); otherwise it remains text with guidance to use `gcc-ubuntu24-docker-net` and `security.network_required` / `security.preview_ports`.
 - Packages that need network or preview ports resolve to `gcc-ubuntu24-docker-net` (bridge + sandbox + published ports). Offline packages still require `network_default: none`.
-- `file-tree` panels render a center-right tree from `GET /api/fs/ls?tree=1` (workspace-scoped). A right activity rail holds the explorer / logs / diagnostics icons; the tree opens to the left of that rail so the click target does not move. There is no FILES header. The tree auto-refreshes in real time: `WorkspaceService.watch` uses the current strategy's watcher and pushes `type: "fs_change"` over `/ws`; the frontend re-fetches `GET /api/fs/ls` on receipt. Bind-mount workspaces watch the host directory; copy strategy keeps the find-polling fallback (~1s via `RuntimeSession.exec`). No MultiLab-specific kernel agent is required.
+- `file-tree` panels render a tree from `GET /api/fs/ls?tree=1` (workspace-scoped). The tree auto-refreshes in real time: `WorkspaceService.watch` uses the current strategy's watcher and pushes `type: "fs_change"` over `/ws`; the frontend re-fetches `GET /api/fs/ls` on receipt. Bind-mount workspaces watch the host directory; copy strategy keeps the find-polling fallback (~1s via `RuntimeSession.exec`). No MultiLab-specific kernel agent is required.
 
 ## Terminal Model
 
@@ -415,7 +425,7 @@ POST /api/trust { package_digest, trust }
 
 The user-settable trust values are currently `untrusted` and `user-trusted`.
 
-The frontend shows the current package trust state in the header and lets the user toggle between these two values. Trust metadata is enforced at command time together with kernel/runtime selection.
+The frontend shows the current package trust state in the diagnostics drawer and lets the user toggle between these two values. Trust metadata is enforced at command time together with kernel/runtime selection.
 
 ## Kernel Registry
 
@@ -442,7 +452,7 @@ POST /api/runtime/select { tutorial, kernel_id }
 
 The resolver currently checks required platform, capabilities, command names, and simple command version constraints such as `>=13`, then prefers a per-package user selection (stored in `.multilab-state/kernel-selection.json`) and otherwise `recommended_kernel`. It returns `version_mismatches` for incompatible command versions and a `runtime` plan describing the provider/network/sandbox binding.
 
-The UI shows a kernel selector for compatible candidates and a "重连终端" button. Selecting a kernel persists the preference, applies it through `RuntimeManager`, and reconnects the WebSocket terminal. If an interactive command hits `runtime_replaced`, the frontend auto-reconnects. Complex semver ranges and dynamic `kernels.json` loading are still not implemented.
+The player auto-matches a compatible kernel on open (`recommended_kernel`, then any stored per-package preference). Kernel, trust, and reconnect are shown in the diagnostics drawer, not in the top bar. Selecting a kernel through `POST /api/runtime/select` still persists the preference, applies it through `RuntimeManager`, and reconnects the WebSocket terminal. If an interactive command hits `runtime_replaced`, the frontend auto-reconnects. Complex semver ranges and dynamic `kernels.json` loading are still not implemented.
 
 ## Known Limitations
 
@@ -455,5 +465,5 @@ The UI shows a kernel selector for compatible candidates and a "重连终端" bu
 - Kernel registry is static (Docker `gcc-ubuntu24-docker` and `gcc-ubuntu24-docker-net`).
 - Runtime selection follows resolved kernel plus optional per-package user preference.
 - Package library management covers list/detail/open/delete; bulk cleanup and save-linked cleanup are not implemented.
-- Panel declarations drive tutorial/terminal/file-tree visibility. `test-results` / `web-preview` open as editor tabs when declared. Logs and diagnostics are always on the right activity rail. The file-tree sits on the right of that rail with no FILES header. Learner-visible copy lives in `public/js/messages.js` (`t('group.key')`); static HTML uses `data-i18n*` filled by `applyStaticCopy()`. Tutorial Markdown is rendered by `public/js/content-renderer.js` (copyable fences, package-relative images, sanitized HTML). Progress UI reads `save.json` metadata from step APIs. Trust changes use a confirmation dialog. Frontend logic lives in `public/js/` ES modules without a bundler. Background long-running preview processes remain open; further live-web work is deprioritized in favor of HTML preview. Editor split groups (preview beside code) are not implemented yet. There is no Settings view yet.
+- Panel declarations name primitives (`tutorial` / `editor` / `terminal` / `web-preview` / `file-tree` / `test-results`). The player auto-layouts; packages cannot set geometry. Preview sits beside the editor when needed. Logs and diagnostics are a host drawer. The file-tree is an editor accessory with no FILES header. Learner-visible copy lives in `public/js/messages.js` (`t('group.key')`); static HTML uses `data-i18n*` filled by `applyStaticCopy()`. Tutorial Markdown is rendered by `public/js/content-renderer.js` (copyable fences, package-relative images, sanitized HTML). Progress UI reads `save.json` metadata from step APIs. Trust changes use a confirmation dialog. Frontend logic lives in `public/js/` ES modules without a bundler. Background long-running preview processes remain open; further live-web work is deprioritized in favor of HTML preview. There is no Settings view yet.
 - The Docker container is single-session and intended for local single-user use.

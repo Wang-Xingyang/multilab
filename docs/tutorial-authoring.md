@@ -129,7 +129,7 @@ Package template files are read-only learning material. Learner edits live in th
 
 ## Markdown And Assets
 
-`instructions.md` is rendered in the left tutorial panel.
+`instructions.md` is rendered in the left tutorial panel. `default_panels` declares which primitives this package needs; the player chooses the layout. Do not try to encode window geometry in the manifest.
 
 Supported content:
 

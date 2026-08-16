@@ -54,9 +54,13 @@ function hasVisibleOrDeclared(panels, type) {
 }
 
 function defaultAreaForType(type) {
+  // Stored for package compatibility. The player ignores geometry and
+  // auto-layouts: tutorial left, editor | preview, terminal bottom,
+  // file-tree as an editor accessory. Logs / diagnostics are host chrome.
   if (type === 'tutorial') return 'left';
   if (type === 'terminal') return 'bottom';
-  if (type === 'test-results' || type === 'web-preview' || type === 'logs' || type === 'diagnostics') {
+  if (type === 'web-preview') return 'right';
+  if (type === 'test-results' || type === 'logs' || type === 'diagnostics') {
     return 'center';
   }
   if (type === 'file-tree') return 'center-right';

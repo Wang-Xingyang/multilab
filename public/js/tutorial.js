@@ -19,11 +19,11 @@ export {
 
 export {
   shortDigest,
-  openLibraryPanel,
-  closeLibraryPanel,
-  loadLibraryList,
-  openLibraryPackage,
-  deleteLibraryPackage,
+  initTutorialPicker,
+  openTutorialPicker,
+  closeTutorialPicker,
+  renderCatalog,
+  setCatalogLabel,
   pickLocalFile,
   openPackageFromFile,
 } from './library.js';

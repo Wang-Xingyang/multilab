@@ -118,6 +118,7 @@ Put compiled binaries and temporary files under `/tmp`.
 - Use semantic step ids, for example `01-first-program`.
 - Avoid emoji and decorative Unicode.
 - Prefer short instructions that fit the left panel.
+- Declare `default_panels` as the windows this tutorial needs. Do not encode layout geometry; the player places tutorial left, editor | preview, and terminal at the bottom.
 
 ## Reference Files
 

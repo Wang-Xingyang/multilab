@@ -78,6 +78,7 @@
     --z-loading: 50;
     --z-status:  100;
     --z-toast:   200;
+    --z-drawer:  250;
     --z-overlay: 300;
     --z-dialog:  320;
 
@@ -147,10 +148,9 @@
   ::-webkit-scrollbar-corner { background: transparent; }
 
   /* ============================================================
-     顶栏: 三段式分组 + 主次
-     左: brand + 教程 + 包管理
-     中: runtime (kernel + 重连 + trust 徽章)
-     右: 编辑操作 ‖ 主操作(run/test/preview) ‖ 主题/export
+     顶栏: 播放器 chrome（不放本步命令、不放 kernel 选择）
+     左: brand + 教程 + 包管理 + 存档
+     右: 收起教程 + 日志 + 诊断 + 主题
      ============================================================ */
   header {
     height: var(--header-h); display: flex; align-items: center;
@@ -168,60 +168,118 @@
     padding-right: 2px; display: flex; align-items: center; gap: 1px;
   }
   header .brand .dot { color: var(--success); margin: 0 1px; }
-  header select {
-    background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
-    border-radius: var(--radius-sm); padding: 5px 24px 5px 8px; font-size: 13px;
-    height: 30px; max-width: 240px;
-    appearance: none;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%238a8a92' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
-    background-repeat: no-repeat; background-position: right 7px center;
-  }
-  header select:hover { border-color: var(--border-strong); }
-  header select:disabled { opacity: 0.5; cursor: not-allowed; }
   header .spacer { flex: 1; min-width: 4px; }
 
-  /* 通用 header 按钮 */
-  header .hdr-btn {
+  .tutorial-picker { position: relative; display: inline-flex; }
+  .tutorial-picker-btn {
+    height: 30px; max-width: 260px; padding: 0 10px; gap: 8px;
+    display: inline-flex; align-items: center;
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); font-size: 13px;
+  }
+  .tutorial-picker-btn:hover, .tutorial-picker.open .tutorial-picker-btn {
+    border-color: var(--border-strong); background: var(--surface-3);
+  }
+  .tutorial-picker-btn span {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+  }
+  .tutorial-picker-btn svg { flex-shrink: 0; color: var(--text-dim); }
+  .tutorial-picker-pop {
+    position: absolute; top: calc(100% + 4px); left: 0; z-index: var(--z-overlay);
+    width: min(380px, calc(100vw - 24px)); max-height: min(70vh, 420px);
+    display: flex; flex-direction: column; overflow: hidden;
+    background: var(--surface-1); border: 1px solid var(--border-strong);
+    border-radius: var(--radius); box-shadow: var(--shadow-md);
+    animation: pop-in-menu var(--dur-fast) var(--ease);
+  }
+  .tutorial-picker-pop[hidden] { display: none !important; }
+  .tutorial-picker-list {
+    overflow-y: auto; padding: 4px; flex: 1 1 auto; min-height: 0;
+    overscroll-behavior: contain; scrollbar-width: thin;
+  }
+  .tutorial-picker-group {
+    padding: 8px 10px 4px; font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint);
+  }
+  .tutorial-picker-item {
+    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+    background: none; border: none; color: var(--text); padding: 8px 10px;
+    border-radius: var(--radius-sm); font-size: 13px; cursor: pointer;
+  }
+  .tutorial-picker-item:hover { background: var(--surface-2); }
+  .tutorial-picker-item.is-current { background: var(--accent-soft); }
+  .tutorial-picker-item-text { min-width: 0; flex: 1; }
+  .tutorial-picker-item-title {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500;
+  }
+  .tutorial-picker-item-meta { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
+  .tutorial-picker-delete {
+    flex-shrink: 0; font-size: 12px; color: var(--text-dim); padding: 4px 6px;
+    border: none; background: none; cursor: pointer;
+    border-radius: var(--radius-xs);
+  }
+  .tutorial-picker-delete:hover { color: var(--error); background: var(--error-soft); }
+  .tutorial-picker-empty {
+    padding: 18px 12px; text-align: center; color: var(--text-faint); font-size: 13px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .tutorial-picker-foot {
+    border-top: 1px solid var(--border); padding: 4px; flex-shrink: 0;
+  }
+  .tutorial-picker-foot button {
+    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+    background: none; border: none; color: var(--text-dim); padding: 8px 10px;
+    border-radius: var(--radius-sm); font-size: 12.5px;
+  }
+  .tutorial-picker-foot button:hover { background: var(--surface-2); color: var(--text); }
+  .tutorial-picker-foot svg { color: var(--text-faint); flex-shrink: 0; }
+
+  /* 通用按钮: 顶栏 / 底栏 / 抽屉共用 */
+  .hdr-btn {
     background: transparent; color: var(--text-dim); border: 1px solid transparent;
     border-radius: var(--radius-sm); padding: 0 8px; height: 30px; font-size: 13px;
     display: inline-flex; align-items: center; gap: 5px;
     transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
     white-space: nowrap;
   }
-  header .hdr-btn:hover { background: var(--surface-2); color: var(--text); }
-  header .hdr-btn:active { background: var(--surface-3); }
-  header .hdr-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  header .hdr-btn:disabled:hover { background: transparent; color: var(--text-dim); }
-  header .hdr-btn.icon-only { padding: 0; width: 30px; justify-content: center; }
-  header .hdr-btn .lbl { font-size: 13px; }
+  .hdr-btn:hover { background: var(--surface-2); color: var(--text); }
+  .hdr-btn:active { background: var(--surface-3); }
+  .hdr-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .hdr-btn:disabled:hover { background: transparent; color: var(--text-dim); }
+  .hdr-btn.icon-only { padding: 0; width: 30px; justify-content: center; }
+  .hdr-btn .lbl { font-size: 13px; }
+  .hdr-btn.is-open { color: var(--text); background: var(--surface-2); }
 
-  /* 主操作组: run / test / preview 更突出 */
-  header .hdr-btn.primary {
+  .hdr-btn.primary {
     background: var(--accent); color: #fff; border-color: var(--accent);
     font-weight: 500;
   }
-  header .hdr-btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
-  header .hdr-btn.primary:disabled { opacity: 0.5; }
-  header .hdr-btn.danger-hover:hover { color: var(--error); }
+  .hdr-btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+  .hdr-btn.primary:disabled { opacity: 0.5; }
+  .hdr-btn.danger-hover:hover { color: var(--error); }
+  .hdr-btn.ghost {
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+  }
+  .hdr-btn.ghost:hover { background: var(--surface-3); border-color: var(--border-strong); color: var(--text); }
 
-  /* trust 徽章: 带状态点 */
-  header .trust-badge {
+  /* trust 徽章: 带状态点（诊断抽屉内） */
+  .trust-badge {
     display: inline-flex; align-items: center; gap: 6px;
     border: 1px solid var(--border); background: var(--surface-2);
     border-radius: var(--radius-sm); padding: 0 9px; height: 30px;
     font-size: 12.5px; color: var(--text-dim);
     transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
   }
-  header .trust-badge:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text); }
-  header .trust-badge:disabled { opacity: 0.6; cursor: default; }
-  header .trust-badge .status-dot {
+  .trust-badge:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text); }
+  .trust-badge:disabled { opacity: 0.6; cursor: default; }
+  .trust-badge .status-dot {
     width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
     background: var(--text-faint);
   }
-  header .trust-badge[data-state="user-trusted"] { color: var(--success); border-color: var(--success-soft); }
-  header .trust-badge[data-state="user-trusted"] .status-dot { background: var(--success); }
-  header .trust-badge[data-state="untrusted"] { color: var(--warn); }
-  header .trust-badge[data-state="untrusted"] .status-dot { background: var(--warn); }
+  .trust-badge[data-state="user-trusted"] { color: var(--success); border-color: var(--success-soft); }
+  .trust-badge[data-state="user-trusted"] .status-dot { background: var(--success); }
+  .trust-badge[data-state="untrusted"] { color: var(--warn); }
+  .trust-badge[data-state="untrusted"] .status-dot { background: var(--warn); }
 
   header input[type="file"] { display: none; }
 
@@ -330,14 +388,31 @@
   }
   .tutorial-placeholder.error .ph-title { color: var(--error); }
 
-  /* step 进度导航已整合到底部 step-bar, 见 .step-bar / .step-dots 样式 */
+  body.tutorial-collapsed #tutorial-panel,
+  body.tutorial-collapsed #drag-v { display: none !important; }
 
   /* ============================================================
-     右侧: 编辑器 + 终端
+     右侧: 编辑器 | 预览 + 底栏终端
      ============================================================ */
   .workspace-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   .workspace-main { flex: 1; display: flex; min-height: 0; min-width: 0; }
   .editor-column { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .preview-column {
+    display: none; flex-direction: column; min-width: 180px; min-height: 0;
+    background: var(--bg); flex: 1 1 42%;
+  }
+  .preview-column.visible { display: flex; }
+  .preview-head {
+    height: var(--tab-h); display: flex; align-items: center; padding: 0 10px;
+    background: var(--surface-1); border-bottom: 1px solid var(--border);
+    color: var(--text); font-size: 12px; flex-shrink: 0;
+  }
+  .preview-body {
+    flex: 1; min-height: 0; overflow: auto; padding: 14px; font-size: 12px;
+    display: flex; flex-direction: column;
+  }
+  .preview-body .preview-frame { flex: 1 1 auto; min-height: 0; height: auto; }
+  .preview-body .aux-empty { flex: 1; justify-content: center; }
 
   /* center-right: file-tree (opens left of a fixed right-edge toggle) */
   .file-tree-panel {
@@ -360,26 +435,20 @@
   .file-tree-item.dir { color: var(--text); cursor: pointer; font-weight: 500; }
   .file-tree-empty { padding: 16px 12px; color: var(--text-faint); font-size: 12px; text-align: center; }
 
-  .activity-rail {
-    width: 32px; flex-shrink: 0; display: flex; flex-direction: column;
-    align-items: stretch; padding: 2px 0; gap: 2px;
-    background: var(--surface-1); border-left: 1px solid var(--border);
-  }
-  .activity-rail .rail-btn {
-    height: var(--tab-h); width: 100%; padding: 0;
-    display: flex; align-items: center; justify-content: center; cursor: pointer;
-    color: var(--text-dim); background: none; border: none;
-    transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
-  }
-  .activity-rail .rail-btn:hover { color: var(--text); background: var(--surface-2); }
-  .activity-rail .rail-btn.is-open { color: var(--accent); background: var(--accent-soft); }
-
   /* 文件 Tab 栏 */
   .file-tabs {
     height: var(--tab-h); display: flex; align-items: stretch; background: var(--surface-1);
     border-bottom: 1px solid var(--border); padding: 0 2px; gap: 0; overflow-x: auto;
     scrollbar-width: none;
   }
+  .file-tabs .tab-tree-btn {
+    margin-left: auto; flex-shrink: 0; width: var(--tab-h); height: 100%;
+    display: none; align-items: center; justify-content: center;
+    background: none; border: none; color: var(--text-dim); cursor: pointer;
+    transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+  }
+  .file-tabs .tab-tree-btn:hover { color: var(--text); background: var(--surface-2); }
+  .file-tabs .tab-tree-btn.is-open { color: var(--accent); background: var(--accent-soft); }
   .file-tabs::-webkit-scrollbar { display: none; }
   .file-tabs .tab {
     padding: 0 8px; font-size: 12px; display: flex; align-items: center; gap: 5px;
@@ -526,7 +595,7 @@
   }
   @keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
 
-  .picker-dropdown, .library-dropdown, .trust-dialog, .app-dialog {
+  .picker-dropdown, .trust-dialog, .app-dialog {
     background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg); animation: pop-in var(--dur) var(--ease);
   }
@@ -566,32 +635,6 @@
   .picker-body .file-item:hover { background: var(--surface-2); }
   .picker-body .file-item .fi-icon { color: var(--text-faint); flex-shrink: 0; }
   .picker-body .file-empty { padding: 20px; text-align: center; color: var(--text-faint); font-size: 13px; }
-
-  /* 教程库 */
-  .library-dropdown {
-    position: fixed; top: calc(var(--header-h) + 8px); left: 50%; transform: translateX(-50%);
-    width: min(680px, calc(100vw - 32px)); max-height: min(72vh, 560px);
-    display: flex; flex-direction: column;
-  }
-  .library-body { padding: 8px; overflow-y: auto; flex: 1; }
-  .library-item {
-    border: 1px solid var(--border); border-radius: var(--radius); padding: 11px 13px; margin-bottom: 8px;
-    background: var(--bg); transition: border-color var(--dur-fast) var(--ease);
-  }
-  .library-item:hover { border-color: var(--border-strong); }
-  .library-item-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-  .library-title { font-size: 13.5px; font-weight: 600; }
-  .library-meta { font-size: 11.5px; color: var(--text-dim); margin-top: 5px; line-height: 1.6; word-break: break-all; font-family: var(--font-mono); }
-  .library-actions { display: flex; gap: 6px; flex-shrink: 0; }
-  .library-actions button {
-    background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
-    border-radius: var(--radius-sm); padding: 5px 10px; font-size: 12px;
-    transition: all var(--dur-fast) var(--ease);
-  }
-  .library-actions button:hover { border-color: var(--border-strong); background: var(--surface-3); }
-  .library-actions button.danger { color: var(--error); }
-  .library-actions button.danger:hover { background: var(--error-soft); border-color: var(--error); }
-  .library-empty { padding: 28px; text-align: center; color: var(--text-faint); font-size: 13px; }
 
   /* 对话框 (trust-dialog + 通用 app-dialog 共享样式) */
   .trust-dialog, .app-dialog {
@@ -650,56 +693,70 @@
   @keyframes spin { to { transform: rotate(360deg); } }
 
   /* ============================================================
-     底部 step 导航条 (横跨左右, prev/dots/next 整合为一组居中)
+     底部: 左固定切步 · 中当前步名可截断 · 右本步命令
      ============================================================ */
   .step-bar {
     flex-shrink: 0; height: var(--step-bar-h); display: flex; align-items: center;
-    justify-content: center; padding: 0 12px;
+    gap: 10px; padding: 0 12px;
     background: var(--surface-1); border-top: 1px solid var(--border);
   }
-  .step-nav { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
-  .step-dots { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
-  .step-bar button {
-    height: 26px; border-radius: var(--radius-sm); font-size: 12px;
-    display: inline-flex; align-items: center; justify-content: center; gap: 4px;
-    cursor: pointer;
-    transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
-  }
+  .step-nav { display: flex; flex-shrink: 0; gap: 4px; }
   #prev-step, #next-step {
+    width: 36px; height: 28px; padding: 0;
     background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
-    padding: 0 9px; min-width: 30px;
+    border-radius: var(--radius-sm);
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
   }
   #prev-step:hover:not(:disabled), #next-step:hover:not(:disabled) { background: var(--surface-3); border-color: var(--border-strong); }
   #prev-step:disabled, #next-step:disabled { opacity: 0.35; cursor: not-allowed; }
-  .step-dot {
-    background: transparent; color: var(--text-dim);
-    border: 1px solid transparent; padding: 0 8px; min-width: 26px;
-    white-space: nowrap; flex-shrink: 0;
+  .step-now {
+    min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 13px; color: var(--text-dim);
   }
-  .step-dot:hover { background: var(--surface-2); color: var(--text); }
-  .step-dot .dot {
-    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
-    border: 1.5px solid var(--text-faint); background: transparent;
-    transition: all var(--dur-fast) var(--ease);
+  .step-now b { color: var(--text); font-weight: 600; }
+  .step-cmds { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .step-cmds .hdr-btn { height: 28px; }
+  .step-cmds .hdr-btn.icon-only { width: 28px; }
+  .step-cmds .hdr-btn.ghost {
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
   }
-  .step-dot.visited .dot { border-color: var(--warn); background: var(--warn); }
-  .step-dot.passed .dot { border-color: var(--success); background: var(--success); }
-  .step-dot.failed .dot { border-color: var(--error); background: var(--error); }
-  .step-dot.current {
-    color: var(--text); background: var(--accent-soft); border-color: var(--accent-line);
+  .step-cmds .hdr-btn.ghost:hover { background: var(--surface-3); border-color: var(--border-strong); color: var(--text); }
+
+  /* 宿主抽屉: 诊断 + 日志同一滚动（含 trust、kernel、重连） */
+  .host-drawer {
+    display: none; position: fixed;
+    top: calc(var(--header-h) + 8px); right: 8px; bottom: calc(var(--step-bar-h) + 8px);
+    width: min(380px, calc(100vw - 24px));
+    background: var(--surface-1); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+    z-index: var(--z-drawer); flex-direction: column;
   }
-  .step-dot.current .dot { border-color: var(--accent); background: var(--accent); }
-  .step-dot .idx {
-    font-variant-numeric: tabular-nums; font-family: var(--font-mono);
-    font-size: 11px; color: var(--text-faint);
+  .host-drawer.open { display: flex; }
+  .drawer-head {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 34px; padding: 0 6px 0 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    font-size: 12.5px; font-weight: 600;
   }
-  .step-dot.current .idx { color: var(--text-dim); }
-  .step-dot .label {
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px;
+  .drawer-close {
+    width: 34px; height: 34px; flex-shrink: 0; background: none; border: none; color: var(--text-dim);
+    font-size: 16px; line-height: 1;
+  }
+  .drawer-close:hover { color: var(--text); background: var(--surface-2); }
+  .drawer-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .drawer-actions {
+    display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 14px 0; flex-shrink: 0;
+  }
+  .drawer-body { padding: 12px 14px 16px; }
+  .drawer-body .aux-empty { padding: 8px 4px 4px; }
+  .drawer-body .aux-empty .empty-icon { display: none; }
+  .drawer-section {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-dim); font-weight: 600; padding: 8px 14px 0;
   }
 
   /* ============================================================
-     顶栏下拉菜单 (package / save 合并)
+     顶栏下拉菜单 (当前教程进度)
      ============================================================ */
   .menu { position: relative; display: inline-flex; }
   .menu-pop {
@@ -741,16 +798,16 @@
      ============================================================ */
   @media (max-width: 980px) {
     header { padding: 0 8px; gap: 4px; }
-    header select { max-width: 150px; }
+    .tutorial-picker-btn { max-width: 180px; }
     .header-group + .header-group { padding-left: 6px; }
     .tutorial-content { padding: 20px 18px; }
     .step-bar { padding: 0 8px; gap: 6px; }
   }
   @media (max-width: 720px) {
     header .brand { display: none; }
-    header .trust-badge .lbl { display: none; }
-    .step-dot .label { display: none; }
-    .library-dropdown { width: calc(100vw - 16px); }
+    .trust-badge .lbl { display: none; }
+    .step-cmds .hdr-btn .lbl { display: none; }
+    .step-cmds .hdr-btn.primary, .step-cmds .hdr-btn.ghost { width: 28px; padding: 0; justify-content: center; }
     .picker-dropdown { width: calc(100vw - 16px); }
   }
 </style>
@@ -758,27 +815,32 @@
 <body>
 
 <header>
-  <!-- 左: brand + 教程 + 包管理菜单 + 存档菜单 -->
   <div class="header-group">
     <div class="brand">Multi<span class="dot">·</span>Lab</div>
-    <button id="theme-btn" class="hdr-btn icon-only" data-i18n-title="chrome.theme">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+    <button id="toggle-tutorial-btn" class="hdr-btn icon-only" type="button" data-i18n-title="chrome.collapseTutorial" data-i18n-aria="chrome.collapseTutorial">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
     </button>
   </div>
   <div class="header-group">
-    <select id="tutorial-select" data-i18n-aria="chrome.selectTutorial"><option value="" data-i18n="files.loading">加载中...</option></select>
-    <div class="menu" id="package-menu">
-      <button id="package-menu-trigger" class="hdr-btn icon-only menu-trigger" data-i18n-title="chrome.packageMenu">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+    <div class="tutorial-picker" id="tutorial-picker">
+      <button type="button" id="tutorial-picker-btn" class="tutorial-picker-btn" data-i18n-title="chrome.selectTutorial" data-i18n-aria="chrome.selectTutorial" aria-haspopup="listbox" aria-expanded="false">
+        <span id="tutorial-picker-label">加载中...</span>
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
-      <div class="menu-pop">
-        <button type="button" id="library-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span class="m-label" data-i18n="package.library"></span></button>
-        <button type="button" id="import-package-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span class="m-label" data-i18n="package.openMlab"></span></button>
+      <div class="tutorial-picker-pop" id="tutorial-picker-pop" hidden>
+        <div class="tutorial-picker-list" id="tutorial-picker-list" role="listbox"></div>
+        <div class="tutorial-picker-foot">
+          <button type="button" id="import-package-btn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <span data-i18n="package.openMlab">打开 .mlab</span>
+          </button>
+        </div>
       </div>
     </div>
     <div class="menu" id="save-menu">
-      <button id="save-menu-trigger" class="hdr-btn icon-only menu-trigger" data-i18n-title="chrome.saveMenu">
+      <button id="save-menu-trigger" class="hdr-btn menu-trigger" data-i18n-title="chrome.saveMenu">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        <span class="lbl" data-i18n="chrome.progressMenu">进度</span>
       </button>
       <div class="menu-pop">
         <button type="button" id="export-save-btn" disabled><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span class="m-label" data-i18n="save.exportProgress"></span></button>
@@ -787,42 +849,15 @@
     </div>
   </div>
 
-  <!-- 中: runtime -->
-  <div class="header-group">
-    <select id="kernel-select" data-i18n-title="kernel.titleFallback" disabled data-i18n-aria="chrome.selectKernel">
-      <option value="" data-i18n="chrome.kernelPlaceholder">kernel…</option>
-    </select>
-    <button id="reconnect-btn" class="hdr-btn icon-only" data-i18n-title="chrome.reconnect" disabled>
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-    </button>
-    <button id="trust-btn" class="trust-badge" data-i18n-title="trust.title" disabled data-state="">
-      <span class="status-dot"></span><span class="lbl" data-i18n="trust.unloaded">未加载</span>
-    </button>
-  </div>
-
   <div class="spacer"></div>
 
-  <!-- 右: 编辑操作 ‖ 主操作 ‖ 主题/export -->
   <div class="header-group">
-    <button id="revert-btn" class="hdr-btn icon-only" data-i18n-title="chrome.revert">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+    <button id="diag-btn" class="hdr-btn" type="button" data-i18n-title="chrome.diagnostics">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+      <span class="lbl" data-i18n="views.diagnostics">诊断</span>
     </button>
-    <button id="save-btn" class="hdr-btn icon-only" data-i18n-title="chrome.save">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-    </button>
-    <button id="interrupt-btn" class="hdr-btn icon-only" data-i18n-title="chrome.interrupt">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-    </button>
-  </div>
-  <div class="header-group">
-    <button id="run-btn" class="hdr-btn primary" data-i18n-title="chrome.run">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21"/></svg>
-    </button>
-    <button id="test-btn" class="hdr-btn primary" data-i18n-title="chrome.test">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20,6 9,17 4,12"/></svg>
-    </button>
-    <button id="preview-btn" class="hdr-btn primary" data-i18n-title="chrome.preview" style="display:none">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+    <button id="theme-btn" class="hdr-btn icon-only" data-i18n-title="chrome.theme">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
     </button>
   </div>
 
@@ -843,7 +878,11 @@
   <section class="workspace-panel" id="workspace-panel">
     <div class="workspace-main" id="workspace-main">
       <div class="editor-column" id="editor-column">
-        <div class="file-tabs" id="file-tabs"></div>
+        <div class="file-tabs" id="file-tabs">
+          <button class="tab-tree-btn" id="tab-show-tree-btn" type="button" data-i18n-title="files.treeTitle" data-i18n-aria="files.toggleTree" aria-pressed="false">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+          </button>
+        </div>
         <div class="editor-wrap" id="editor-wrap">
           <div id="monaco"></div>
           <div class="editor-view" id="pane-test-results">
@@ -852,23 +891,15 @@
               <span data-i18n="chrome.testEmpty">运行检查后，结果会显示在这里。</span>
             </div>
           </div>
-          <div class="editor-view" id="pane-web-preview">
-            <div class="aux-empty">
-              <svg class="empty-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-              <span data-i18n="chrome.previewEmpty">运行预览命令后，内容会显示在这里。</span>
-            </div>
-          </div>
-          <div class="editor-view" id="pane-logs">
-            <div class="aux-empty">
-              <svg class="empty-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-              <span data-i18n="panels.logsEmpty">会话日志会显示在这里。</span>
-            </div>
-          </div>
-          <div class="editor-view" id="pane-diagnostics">
-            <div class="aux-empty">
-              <svg class="empty-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-              <span data-i18n="diagnostics.emptyHint">打开教程后可查看 kernel / trust / runtime 诊断。</span>
-            </div>
+        </div>
+      </div>
+      <div class="drag-handle-v" id="drag-v-preview" style="display:none"></div>
+      <div class="preview-column" id="preview-column">
+        <div class="preview-head" data-i18n="views.preview">预览</div>
+        <div class="preview-body" id="pane-web-preview">
+          <div class="aux-empty">
+            <svg class="empty-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            <span data-i18n="chrome.previewEmpty">运行预览命令后，内容会显示在这里。</span>
           </div>
         </div>
       </div>
@@ -878,17 +909,6 @@
           <div class="file-tree-empty" data-i18n="files.loading">加载中...</div>
         </div>
       </aside>
-      <div class="activity-rail" id="activity-rail">
-        <button class="rail-btn" id="tab-show-tree-btn" type="button" data-i18n-title="files.treeTitle" data-i18n-aria="files.toggleTree" aria-pressed="false">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
-        </button>
-        <button class="rail-btn" id="logs-btn" type="button" data-i18n-title="views.logs">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
-        </button>
-        <button class="rail-btn" id="diag-btn" type="button" data-i18n-title="views.diagnostics">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-        </button>
-      </div>
     </div>
     <div class="drag-handle-h" id="drag-h"></div>
     <div class="terminal-wrap" id="terminal-wrap">
@@ -902,12 +922,64 @@
     <button id="prev-step" type="button" data-i18n-title="tutorial.prev">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
     </button>
-    <div class="step-dots" id="step-dots"></div>
     <button id="next-step" type="button" data-i18n-title="tutorial.next">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
     </button>
   </div>
+  <div class="step-now" id="step-now"></div>
+  <div class="step-cmds">
+    <button id="interrupt-btn" class="hdr-btn icon-only ghost" data-i18n-title="chrome.interrupt">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+    </button>
+    <button id="run-btn" class="hdr-btn primary" data-i18n-title="chrome.run">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21"/></svg>
+      <span class="lbl" data-i18n="chrome.runLabel">运行</span>
+    </button>
+    <button id="test-btn" class="hdr-btn primary" data-i18n-title="chrome.test">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20,6 9,17 4,12"/></svg>
+      <span class="lbl" data-i18n="chrome.testLabel">检查</span>
+    </button>
+    <button id="preview-btn" class="hdr-btn primary" data-i18n-title="chrome.preview" style="display:none">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+      <span class="lbl" data-i18n="chrome.previewLabel">预览</span>
+    </button>
+    <button id="revert-btn" class="hdr-btn ghost" data-i18n-title="chrome.revert">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+      <span class="lbl" data-i18n="chrome.resetLabel">重置</span>
+    </button>
+  </div>
 </footer>
+
+<aside class="host-drawer" id="host-drawer" hidden>
+  <div class="drawer-head">
+    <span data-i18n="views.diagnostics">诊断</span>
+    <button type="button" class="drawer-close" id="drawer-close" data-i18n-title="chrome.close" data-i18n-aria="chrome.close">×</button>
+  </div>
+  <div class="drawer-scroll">
+    <div class="drawer-actions">
+      <button id="trust-btn" class="trust-badge" data-i18n-title="trust.title" disabled data-state="">
+        <span class="status-dot"></span><span class="lbl" data-i18n="trust.unloaded">未加载</span>
+      </button>
+      <button id="reconnect-btn" class="hdr-btn ghost" data-i18n-title="chrome.reconnect" disabled>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        <span class="lbl" data-i18n="chrome.reconnectLabel">重连终端</span>
+      </button>
+    </div>
+    <div class="drawer-body" id="pane-diagnostics">
+      <div class="aux-empty">
+        <svg class="empty-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        <span data-i18n="diagnostics.emptyHint">打开教程后可查看 kernel / trust / runtime 诊断。</span>
+      </div>
+    </div>
+    <h4 class="drawer-section" data-i18n="views.logs">日志</h4>
+    <div class="drawer-body" id="pane-logs">
+      <div class="aux-empty">
+        <svg class="empty-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <span data-i18n="panels.logsEmpty">会话日志会显示在这里。</span>
+      </div>
+    </div>
+  </div>
+</aside>
 
 <div class="status-bar" id="status-bar"></div>
 <div class="toast" id="toast"></div>
@@ -927,25 +999,6 @@
     </div>
     <div class="picker-body" id="file-picker-list">
       <div class="file-empty" data-i18n="files.loading">加载中...</div>
-    </div>
-  </div>
-</div>
-
-<!-- 教程库 -->
-<div class="picker-overlay" id="library-overlay" style="display:none">
-  <div class="library-dropdown" id="library-dropdown">
-    <div class="picker-header">
-      <span class="ph-label" data-i18n="chrome.libraryImported">已导入教程库</span>
-      <div class="picker-header-actions">
-        <button class="picker-refresh" id="library-refresh-btn">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/></svg>
-          <span data-i18n="chrome.refresh">刷新</span>
-        </button>
-        <button type="button" class="picker-close" id="library-close-btn" data-i18n-title="chrome.close" data-i18n-aria="chrome.close">×</button>
-      </div>
-    </div>
-    <div class="library-body" id="library-list">
-      <div class="library-empty" data-i18n="files.loading">加载中...</div>
     </div>
   </div>
 </div>
