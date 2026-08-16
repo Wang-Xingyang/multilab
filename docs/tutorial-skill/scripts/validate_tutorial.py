@@ -26,6 +26,10 @@ from pathlib import Path
 VALID_LANGUAGES = {'c', 'cpp', 'javascript', 'python', 'shell', 'rust', 'go'}
 VALID_INHERIT_MODES = {'template', 'previous_save', 'overlay_template'}
 VALID_COMMAND_TYPES = {'setup', 'run', 'test', 'check', 'preview', 'cleanup'}
+PACKAGE_PANEL_TYPES = {
+    'tutorial', 'file-tree', 'editor', 'terminal', 'test-results', 'web-preview',
+}
+HOST_PANEL_TYPES = {'logs', 'diagnostics'}
 EMOJI_RE = re.compile(
     '[\U0001F300-\U0001F9FF\U0001FA00-\U0001FAFF\U00002600-\U000027BF]'
 )
@@ -34,6 +38,49 @@ CHAIN_ID_RE = re.compile(r'^[a-z][a-z0-9-]*$')
 IMG_MD_RE = re.compile(r'!\[[^\]]*\]\(([^)]+)\)')
 IMG_HTML_RE = re.compile(r'<img\b[^>]*\bsrc=["\']([^"\']+)["\']', re.I)
 CONTENT_ASSET_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'}
+
+
+def panel_type(entry):
+    if isinstance(entry, str):
+        return entry.strip()
+    if isinstance(entry, dict):
+        return str(entry.get('type') or '').strip()
+    return ''
+
+
+def declared_panel_types(entries):
+    types = []
+    if not isinstance(entries, list):
+        return types
+    for entry in entries:
+        kind = panel_type(entry)
+        if kind:
+            types.append(kind)
+    return types
+
+
+def check_panel_list(entries, label, errors, warnings):
+    if entries is None:
+        return
+    if not isinstance(entries, list):
+        errors.append(f"{label}: panels must be an array of types or objects")
+        return
+    for entry in entries:
+        if not isinstance(entry, (str, dict)):
+            errors.append(f"{label}: panel entries must be strings or objects with type")
+            continue
+        kind = panel_type(entry)
+        if not kind:
+            warnings.append(f"{label}: panel entry is missing type")
+            continue
+        if kind in HOST_PANEL_TYPES:
+            warnings.append(
+                f"{label}: '{kind}' is host chrome, not a package window "
+                "(omit it; diagnostics/logs open from the player)"
+            )
+            continue
+        if kind not in PACKAGE_PANEL_TYPES:
+            warnings.append(f"{label}: unknown panel type '{kind}' (dropped by the player)")
 
 
 def looks_like_url(src):
@@ -145,6 +192,12 @@ def validate(tutorial_dir):
     if 'runtime_requirements' not in cfg:
         warnings.append(f"{manifest_name}: missing runtime_requirements")
 
+    check_panel_list(cfg.get('default_panels'), f"{manifest_name} default_panels", errors, warnings)
+    package_panel_types = [
+        kind for kind in declared_panel_types(cfg.get('default_panels'))
+        if kind in PACKAGE_PANEL_TYPES
+    ]
+
     # id should match directory name
     if cfg.get('id') and cfg['id'] != tutorial_dir.name:
         warnings.append(f"{manifest_name}: id '{cfg['id']}' does not match directory name '{tutorial_dir.name}'")
@@ -205,17 +258,42 @@ def validate(tutorial_dir):
         if inherit_mode not in VALID_INHERIT_MODES:
             errors.append(f"step '{step_id}': inherit_mode must be one of {sorted(VALID_INHERIT_MODES)}")
 
+        check_panel_list(step.get('panels'), f"step '{step_id}' panels", errors, warnings)
+        if step.get('panels'):
+            effective_panels = [
+                kind for kind in declared_panel_types(step.get('panels'))
+                if kind in PACKAGE_PANEL_TYPES
+            ]
+        else:
+            effective_panels = package_panel_types
+
         commands = step.get('commands', [])
         if not isinstance(commands, list) or not commands:
             warnings.append(f"step '{step_id}': no commands declared")
+        if not isinstance(commands, list):
+            commands = []
+        command_types = set()
         for j, command in enumerate(commands):
             label = f"step '{step_id}' command {j}"
             command_type = command.get('type')
+            command_types.add(command_type)
             if command_type not in VALID_COMMAND_TYPES:
                 errors.append(f"{label}: type must be one of {sorted(VALID_COMMAND_TYPES)}")
             script = command.get('script')
             script_path = resolve_package_path(tutorial_dir, script, label, errors)
             validate_script(script_path, label, cfg.get('language'), errors, warnings, command_type)
+
+        if 'preview' in command_types and 'web-preview' not in effective_panels and effective_panels:
+            warnings.append(
+                f"step '{step_id}': has a preview command but this step's windows "
+                "do not include web-preview"
+            )
+        if any(c.get('terminal') == 'interactive' for c in commands if isinstance(c, dict)) \
+                and 'terminal' not in effective_panels and effective_panels:
+            warnings.append(
+                f"step '{step_id}': has an interactive command but this step's windows "
+                "do not include terminal"
+            )
 
         # check for old-style inline fields (migration check)
         for old_field in ('instructions', 'files', 'run_cmd'):

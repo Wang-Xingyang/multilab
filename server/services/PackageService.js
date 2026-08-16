@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs/promises';
-import { normalizePanels } from './PanelModel.js';
+import { normalizePanels, resolveStepPanels } from './PanelModel.js';
 
 export const LANG_BY_EXT = {
   '.c': 'c', '.h': 'c', '.cpp': 'cpp', '.cc': 'cpp', '.hpp': 'cpp',
@@ -259,6 +259,7 @@ export class PackageService {
       validateSafePath(step.id);
       const stepDir = path.join(tutorialDir, 'steps', step.id);
       step.inherit_mode = stepInheritMode(step);
+      step.ui_panels = resolveStepPanels(cfg.ui_panels, step.panels);
 
       try {
         step.instructions = await fs.readFile(path.join(stepDir, 'instructions.md'), 'utf8');

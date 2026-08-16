@@ -13,7 +13,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import { fileURLToPath } from 'url';
 
-import { normalizePanels, FALLBACK_PANELS } from '../server/services/PanelModel.js';
+import { normalizePanels, resolveStepPanels, FALLBACK_PANELS } from '../server/services/PanelModel.js';
 import { createDefaultKernelRegistry, packageNeedsNetwork } from '../server/services/KernelRegistry.js';
 import { PackageService, validateWorkspaceRelPath, contentAssetResponseHeaders } from '../server/services/PackageService.js';
 import { SaveService } from '../server/services/SaveService.js';
@@ -190,8 +190,6 @@ await test('PanelModel keeps hello-c test-results and file-tree panels', async (
   const result = normalizePanels(manifest.default_panels);
   assert.equal(result.has['test-results'], true);
   assert.equal(result.has['file-tree'], true);
-  assert.equal(result.has.logs, true);
-  assert.equal(result.has.diagnostics, true);
   const testPanel = result.panels.find(p => p.type === 'test-results');
   assert.ok(testPanel);
   assert.equal(testPanel.hidden, true);
@@ -205,6 +203,39 @@ await test('PanelModel ignores unknown panel types', () => {
   ]);
   assert.equal(result.panels.length, 1);
   assert.equal(result.panels[0].type, 'tutorial');
+});
+
+await test('PanelModel accepts string panel names', () => {
+  const result = normalizePanels(['tutorial', 'web-preview']);
+  assert.equal(result.has.tutorial, true);
+  assert.equal(result.has['web-preview'], true);
+  assert.equal(result.has.editor, false);
+});
+
+await test('resolveStepPanels inherits package when overlay missing', () => {
+  const pkg = normalizePanels(['tutorial', 'editor', 'terminal']);
+  const inherited = resolveStepPanels(pkg, undefined);
+  assert.equal(inherited.has.editor, true);
+  assert.equal(inherited.has.terminal, true);
+  const empty = resolveStepPanels(pkg, []);
+  assert.equal(empty.has.editor, true);
+});
+
+await test('resolveStepPanels replaces package windows for that step', () => {
+  const pkg = normalizePanels(['tutorial', 'editor', 'terminal', 'web-preview']);
+  const step = resolveStepPanels(pkg, ['tutorial', 'web-preview']);
+  assert.equal(step.has.tutorial, true);
+  assert.equal(step.has['web-preview'], true);
+  assert.equal(step.has.editor, false);
+  assert.equal(step.has.terminal, false);
+});
+
+await test('resolveStepPanels drops host chrome and unknown types', () => {
+  const pkg = normalizePanels(['tutorial', 'editor']);
+  const step = resolveStepPanels(pkg, ['logs', 'diagnostics', 'arbitrary-ui']);
+  assert.equal(step.has.editor, true);
+  assert.equal(step.has.tutorial, true);
+  assert.equal(step.panels.some(p => p.type === 'logs'), false);
 });
 
 await test('KernelRegistry preferred kernel selection', () => {
@@ -332,6 +363,8 @@ await test('PackageService loads hello-c with ui_panels', async () => {
   assert.ok(tutorial.package_digest.startsWith('sha256:'));
   assert.ok(tutorial.ui_panels?.has?.['test-results']);
   assert.ok(tutorial.steps.length >= 1);
+  assert.equal(tutorial.steps[0].ui_panels?.has?.editor, true);
+  assert.equal(tutorial.steps[0].ui_panels?.has?.terminal, true);
 });
 
 const PNG_1X1 = Buffer.from(

@@ -31,7 +31,7 @@ Command scripts may live directly under the step directory only when editing an 
 ## Workflow
 
 1. Identify the learning goal, target language, step count, and whether terminal interaction is required.
-2. Design the step sequence before writing files.
+2. Design the step sequence before writing files. Decide which windows each step needs (`default_panels` plus optional per-step `panels`).
 3. Choose `inherit_mode` for each step:
    - `template` for independent exercises.
    - `previous_save` for continuous projects.
@@ -118,7 +118,40 @@ Put compiled binaries and temporary files under `/tmp`.
 - Use semantic step ids, for example `01-first-program`.
 - Avoid emoji and decorative Unicode.
 - Prefer short instructions that fit the left panel.
-- Declare `default_panels` as the windows this tutorial needs. Do not encode layout geometry; the player places tutorial left, editor | preview, and terminal at the bottom.
+- Declare `default_panels` as the windows this tutorial needs (`tutorial`, `editor`, `terminal`, `web-preview`, `file-tree`, `test-results`). Do not encode layout geometry; the player places tutorial left, editor | preview, and terminal at the bottom.
+- Optional per-step `panels` replaces that default for one step (same type names, or strings like `["tutorial", "web-preview"]`). Omit it to inherit the package set. Logs and diagnostics are host chrome, not step windows.
+
+## Preview
+
+Two captured-preview shapes:
+
+1. **HTML** (prefer for visualizations): `terminal: "captured"`. The script prints `MULTILAB_PREVIEW_HTML` then a self-contained HTML document. The player shows it in a sandboxed iframe (`allow-scripts` only).
+2. **Live URL** (React/Vite and similar): the lab process prints `MULTILAB_PREVIEW_URL=http://...` and the package declares network / `preview_ports`.
+
+Algorithm walkthroughs belong in that HTML page. Put 单步 / 播放 / 重置 **inside the iframe**. The player has no host stepper and does not talk to the preview with `postMessage`. Ship `viz.html` in the step `files/` and `cat` it from `preview.sh`, or generate HTML from a trace your script produces. Keep CSS/JS inline; package `assets/` are for tutorial Markdown images, not for the lab filesystem.
+
+Example lecture step:
+
+```json
+{
+  "id": "01-trace",
+  "title": "Watch Dijkstra",
+  "inherit_mode": "template",
+  "panels": ["tutorial", "web-preview"],
+  "commands": [
+    {
+      "id": "preview",
+      "type": "preview",
+      "label": "Preview",
+      "script": "steps/01-trace/commands/preview.sh",
+      "terminal": "captured",
+      "timeout_sec": 10
+    }
+  ]
+}
+```
+
+A later coding step can omit `web-preview` and list `tutorial`, `editor`, and `terminal` instead.
 
 ## Reference Files
 

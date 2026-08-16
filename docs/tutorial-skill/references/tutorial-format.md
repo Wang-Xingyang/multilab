@@ -41,6 +41,8 @@ Recommended:
 
 `default_panels` names which windows the package needs (`tutorial`, `editor`, `terminal`, `web-preview`, `file-tree`, `test-results`). It does not set geometry. The player auto-layouts: tutorial nailed left, editor and preview side by side when both are needed, terminal at the bottom of the work area, file-tree as an editor accessory. Logs and diagnostics are host chrome, not package windows. `area` is stored for compatibility and ignored.
 
+A step may set `panels` to replace that default for that step only. Same types; strings (`"tutorial"`) or objects (`{ "type": "tutorial" }`) are both valid. Omit `panels` to inherit `default_panels`. An algorithm lecture step can use `["tutorial", "web-preview"]`; a later coding step can use `["tutorial", "editor", "terminal"]`.
+
 ## Runtime Requirements
 
 Example:
@@ -72,6 +74,7 @@ Optional:
 
 - `chain`
 - `entry_file`
+- `panels` (subset/replacement of package `default_panels` for this step)
 
 ## `inherit_mode`
 
@@ -109,6 +112,15 @@ Valid terminal modes:
 - `captured`
 
 Script paths must be relative to the tutorial root and must not escape the package directory.
+
+## Preview
+
+A `preview` command with `terminal: "captured"` can print:
+
+- `MULTILAB_PREVIEW_HTML` followed by a self-contained HTML document (sandboxed iframe), or
+- `MULTILAB_PREVIEW_URL=http://...` for a lab-side dev server (needs network / `preview_ports`).
+
+Prefer HTML for algorithm visualizations. Put 单步 / 播放 / 重置 inside that HTML; the player does not provide a host stepper. `cat` a `viz.html` from the step `files/` directory, or generate the page from a trace. Live React preview is the URL path, not a separate panel type.
 
 ## Example Manifest
 

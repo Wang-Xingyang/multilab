@@ -129,7 +129,7 @@ Package template files are read-only learning material. Learner edits live in th
 
 ## Markdown And Assets
 
-`instructions.md` is rendered in the left tutorial panel. `default_panels` declares which primitives this package needs; the player chooses the layout. Do not try to encode window geometry in the manifest.
+`instructions.md` is rendered in the left tutorial panel. `default_panels` declares which primitives this package needs; a step may set `panels` to show a different subset. The player chooses the layout. Do not try to encode window geometry in the manifest.
 
 Supported content:
 
@@ -224,6 +224,26 @@ echo "$output" | grep -q "Hello"
 
 Captured test commands pass when exit code is `0`.
 
+## Preview
+
+The preview column is an isolated iframe, not a React/algorithm engine.
+
+**HTML (prefer for visualizations).** Use `type: "preview"` with `terminal: "captured"`. Print `MULTILAB_PREVIEW_HTML` then a complete HTML document (inline CSS/JS). The player loads it with `sandbox="allow-scripts"`. For Dijkstra-style walkthroughs, put 单步 / 播放 / 重置 **in that page**. The player has no host stepper.
+
+The lab only sees workspace files. Put `viz.html` in the step `files/` and cat it:
+
+```bash
+#!/bin/bash
+echo MULTILAB_PREVIEW_HTML
+cat /home/student/workspace/viz.html
+```
+
+Or have the script run the learner program, emit a trace, and wrap it in HTML.
+
+**Live URL.** Print `MULTILAB_PREVIEW_URL=http://127.0.0.1:5173/` from a lab dev server. Declare `security.network_required` or `security.preview_ports` so the kernel can publish the port. Use this for student React apps, not for simple animations.
+
+A lecture step can declare `"panels": ["tutorial", "web-preview"]` so the editor and terminal stay closed until a later coding step.
+
 ## Authoring Rules
 
 - Use `multilab.json`, never `tutorial.json`.
@@ -237,6 +257,7 @@ Captured test commands pass when exit code is `0`.
 - Keep each step focused on one concept.
 - Add TODO markers where the learner should edit.
 - Prefer semantic ids such as `01-first-program`.
+- Use step `panels` when a lecture step should hide the editor, or a coding step should hide preview.
 - Do not use emoji or decorative Unicode in tutorial text or code comments.
 
 ## Validation

@@ -134,11 +134,13 @@ export async function enterStep(targetIndex, opts = {}) {
     // Only now is this the live step. Updating currentStep before load
     // made save/run persist the previous editor buffers into the new step.
     state.currentStep = targetIndex;
+    state.previewForcedOpen = false;
     applyProgress(result.progress);
     loadFilesIntoEditor(result.files || [], {
       ui: result.ui,
       entryFile: step.entry_file,
     });
+    applyPanelLayout();
     renderTutorialStepText();
     applyProgressToUi();
     appendSessionLog(t('tutorial.enterLog', { id: step.id }));

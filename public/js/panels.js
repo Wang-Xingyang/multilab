@@ -22,6 +22,8 @@ export function setPanelHooks(hooks = {}) {
 }
 
 function getPanelDecls() {
+  const stepPanels = currentStepObj()?.ui_panels?.panels;
+  if (Array.isArray(stepPanels) && stepPanels.length) return stepPanels;
   if (Array.isArray(state.currentTutorial?.ui_panels?.panels) && state.currentTutorial.ui_panels.panels.length) {
     return state.currentTutorial.ui_panels.panels;
   }
@@ -78,7 +80,7 @@ function applyPanelLayout() {
   const showTutorial = packageShowsTutorial && !userCollapsed;
   const showEditor = Boolean(editor && !editor.hidden);
   const showPreview = Boolean((preview && !preview.hidden) || state.previewForcedOpen);
-  const showTerminal = !terminal || !terminal.hidden;
+  const showTerminal = Boolean(terminal && !terminal.hidden);
   const showFileTree = Boolean(showEditor && fileTree && !fileTree.hidden);
 
   document.body.classList.toggle('tutorial-collapsed', userCollapsed && packageShowsTutorial);

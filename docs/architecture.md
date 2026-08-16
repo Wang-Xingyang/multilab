@@ -252,7 +252,7 @@ The old `/api/test` and WebSocket `type: "run"` paths have been removed.
 
 ## Panels And Preview
 
-`PackageService` normalizes `default_panels` into `ui_panels` through `PanelModel`. Unknown panel types are dropped so packages cannot inject arbitrary host UI.
+`PackageService` normalizes `default_panels` into `ui_panels` through `PanelModel`. A step may set `panels`; that overlay is resolved into `step.ui_panels` (inherit the package set when omitted). Unknown panel types are dropped so packages cannot inject arbitrary host UI.
 
 Packages declare **which primitives they need**, not window geometry. The player auto-layouts. `public/index.html` is the layout source of truth.
 
@@ -260,7 +260,7 @@ Current UI behavior:
 
 - One player top bar: brand and tutorial-collapse on the left; tutorial catalog (current tutorial + all packages + open `.mlab`) and current-tutorial progress; diagnostics and theme on the right. Logs live inside the diagnostics drawer. No kernel picker, no trust badge, and no step commands in the header.
 - Tutorial is nailed left and collapsible. Packages cannot move it. `area` on panel objects is stored for compatibility and ignored for geometry.
-- Editor and preview are optional peer columns (side by side when both are needed). Preview is an observation panel, not a file tab. Declaring `web-preview` (and not `hidden`) shows the column; a `type: "preview"` command also opens it.
+- Editor and preview are optional peer columns (side by side when both are needed). Preview is an observation panel, not a file tab. Declaring `web-preview` (and not `hidden`) shows the column; a `type: "preview"` command also opens it. Visibility follows the **current step** (`step.ui_panels`), not only the package default.
 - Terminal stays at the bottom of the work area, never a third column.
 - File-tree is an editor accessory, toggled from the editor tab strip. There is no FILES header and no activity rail.
 - `test-results` still opens as an editor tab when declared.
@@ -465,5 +465,5 @@ The player auto-matches a compatible kernel on open (`recommended_kernel`, then 
 - Kernel registry is static (Docker `gcc-ubuntu24-docker` and `gcc-ubuntu24-docker-net`).
 - Runtime selection follows resolved kernel plus optional per-package user preference.
 - Package library management covers list/detail/open/delete; bulk cleanup and save-linked cleanup are not implemented.
-- Panel declarations name primitives (`tutorial` / `editor` / `terminal` / `web-preview` / `file-tree` / `test-results`). The player auto-layouts; packages cannot set geometry. Preview sits beside the editor when needed. Logs and diagnostics are a host drawer. The file-tree is an editor accessory with no FILES header. Learner-visible copy lives in `public/js/messages.js` (`t('group.key')`); static HTML uses `data-i18n*` filled by `applyStaticCopy()`. Tutorial Markdown is rendered by `public/js/content-renderer.js` (copyable fences, package-relative images, sanitized HTML). Progress UI reads `save.json` metadata from step APIs. Trust changes use a confirmation dialog. Frontend logic lives in `public/js/` ES modules without a bundler. Background long-running preview processes remain open; further live-web work is deprioritized in favor of HTML preview. There is no Settings view yet.
+- Panel declarations name primitives (`tutorial` / `editor` / `terminal` / `web-preview` / `file-tree` / `test-results`). Package `default_panels` is the default; a step `panels` overlay replaces it for that step. The player auto-layouts; packages cannot set geometry. Preview sits beside the editor when needed. Logs and diagnostics are a host drawer. The file-tree is an editor accessory with no FILES header. Learner-visible copy lives in `public/js/messages.js` (`t('group.key')`); static HTML uses `data-i18n*` filled by `applyStaticCopy()`. Tutorial Markdown is rendered by `public/js/content-renderer.js` (copyable fences, package-relative images, sanitized HTML). Progress UI reads `save.json` metadata from step APIs. Trust changes use a confirmation dialog. Frontend logic lives in `public/js/` ES modules without a bundler. Background long-running preview processes remain open; further live-web work is deprioritized in favor of HTML preview. There is no Settings view yet.
 - The Docker container is single-session and intended for local single-user use.
