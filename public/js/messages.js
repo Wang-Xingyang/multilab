@@ -123,8 +123,6 @@ const catalog = {
     copy: '复制',
     copied: '已复制',
     copyFailed: '复制失败',
-    code: '代码',
-    command: '命令',
   },
   files: {
     openFailed: '打开文件失败: {error}',

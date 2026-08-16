@@ -7,7 +7,7 @@
  * package HTML cannot inject it.
  */
 import { t } from './messages.js';
-import { toast, escapeAttr } from './ui.js';
+import { toast } from './ui.js';
 
 export const COMMAND_LANGS = new Set([
   'bash', 'sh', 'shell', 'console', 'terminal', 'zsh', 'fish',
@@ -101,41 +101,28 @@ export function applyTutorialDomRewrites(root, ctx = {}) {
   });
 }
 
-function langFromPre(pre) {
-  const cls = pre.querySelector('code')?.className || '';
-  const match = cls.match(/language-([\w+-]+)/i);
-  return match ? match[1].toLowerCase() : '';
-}
-
 function copyButtonLabel(copied) {
   return copied ? t('content.copied') : t('content.copy');
 }
 
 function setCopyButtonState(btn, copied) {
-  btn.innerHTML = `${copied ? CHECK_ICON : COPY_ICON}<span>${escapeAttr(copyButtonLabel(copied))}</span>`;
+  btn.innerHTML = copied ? CHECK_ICON : COPY_ICON;
   btn.title = copyButtonLabel(copied);
   btn.setAttribute('aria-label', copyButtonLabel(copied));
+  btn.classList.toggle('is-copied', copied);
 }
 
 export function enhanceCodeBlocks(root) {
   root.querySelectorAll('pre').forEach(pre => {
     if (pre.closest('.md-block')) return;
-    const lang = langFromPre(pre);
-    const command = isCommandLang(lang);
     const wrap = document.createElement('div');
-    wrap.className = `md-block ${command ? 'md-block-command' : 'md-block-code'}`;
-    const bar = document.createElement('div');
-    bar.className = 'md-block-bar';
-    const label = document.createElement('span');
-    label.className = 'md-block-lang';
-    label.textContent = command ? t('content.command') : (lang || t('content.code'));
+    wrap.className = 'md-block';
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'md-copy-btn';
     setCopyButtonState(btn, false);
-    bar.append(label, btn);
     pre.parentNode.insertBefore(wrap, pre);
-    wrap.append(bar, pre);
+    wrap.append(btn, pre);
   });
 }
 

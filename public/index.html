@@ -281,34 +281,33 @@
     border: 1px solid var(--border);
   }
   .tutorial-content pre {
-    background: var(--bg); padding: 12px 14px; border-radius: var(--radius);
+    background: var(--surface-2); padding: 8px 12px; border-radius: var(--radius);
     overflow-x: auto; margin: 12px 0; border: 1px solid var(--border);
   }
   .tutorial-content pre code { background: transparent; padding: 0; color: var(--text); border: none; font-size: 12.5px; }
   .tutorial-content .md-block {
-    margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius);
-    background: var(--bg); overflow: hidden;
-  }
-  .tutorial-content .md-block-command { border-left: 3px solid var(--accent-line); }
-  .tutorial-content .md-block-bar {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    padding: 4px 8px 4px 12px; background: var(--surface-2);
-    border-bottom: 1px solid var(--border); user-select: none;
-  }
-  .tutorial-content .md-block-lang {
-    font-size: 11px; color: var(--text-faint); font-family: var(--font-mono);
-    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    position: relative; margin: 12px 0; border: 1px solid var(--border);
+    border-radius: var(--radius); background: var(--surface-2);
   }
   .tutorial-content .md-copy-btn {
-    display: inline-flex; align-items: center; gap: 4px;
-    background: transparent; color: var(--text-dim); border: 1px solid transparent;
-    border-radius: var(--radius-xs); padding: 2px 7px; height: 22px; font-size: 11px;
-    flex-shrink: 0;
-    transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+    display: inline-flex; align-items: center; justify-content: center;
+    position: absolute; top: 6px; right: 6px; z-index: 1;
+    width: 22px; height: 22px; padding: 0;
+    background: var(--surface-2); color: var(--text-dim);
+    border: 1px solid var(--border); border-radius: var(--radius-xs);
+    user-select: none;
+    opacity: 0; pointer-events: none;
+    transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
   }
-  .tutorial-content .md-copy-btn:hover { background: var(--surface-3); color: var(--text); border-color: var(--border); }
+  .tutorial-content .md-block:hover .md-copy-btn,
+  .tutorial-content .md-block:focus-within .md-copy-btn,
+  .tutorial-content .md-copy-btn.is-copied {
+    opacity: 1; pointer-events: auto;
+  }
+  .tutorial-content .md-copy-btn:hover { background: var(--surface-3); color: var(--text); }
   .tutorial-content .md-block pre {
     margin: 0; border: none; border-radius: 0; background: transparent;
+    padding: 10px 12px; padding-right: 2.25rem;
   }
   .tutorial-content blockquote {
     border-left: 3px solid var(--accent-line); padding: 2px 12px;

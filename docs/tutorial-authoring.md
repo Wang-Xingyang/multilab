@@ -147,7 +147,7 @@ Image paths are resolved relative to the step directory first, then the package 
 
 Remote `http(s)` images are not loaded. Put screenshots in the package so the tutorial stays local-first.
 
-Fenced code blocks are copyable. Tag shell/command examples as `bash` (or `sh` / `console`) so they render as command blocks:
+Fenced code blocks are copyable. A `bash` fence is still useful so authors and tools know it is a shell example; the player does not show the language name:
 
 ```bash
 gcc /home/student/workspace/hello.c -o /tmp/a.out -Wall && /tmp/a.out

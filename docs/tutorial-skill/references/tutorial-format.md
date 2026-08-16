@@ -163,7 +163,7 @@ Script paths must be relative to the tutorial root and must not escape the packa
 - `![alt](assets/overview.png)` resolves at the package root, or `![alt](diagram.png)` next to the step.
 - Allowed image types: png, jpeg, gif, webp, bmp, svg. Use `![alt](assets/flow.svg)`. Inline `<svg>` HTML is stripped; package SVG files are shown as images.
 - Remote `http(s)` images are not loaded.
-- Tag shell examples as `bash` so they render as copyable command blocks.
+- Tag shell examples as `bash` so they are copyable command fences. The player does not display the language name.
 
 ## Validation
 

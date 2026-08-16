@@ -141,7 +141,7 @@ GET /api/tutorials/:source_key/assets?path=<authored-src>&step=<step-id>
   X-Content-Type-Options: nosniff
 ```
 
-Fenced code blocks get a copy button. Fences tagged `bash` / `sh` / `shell` / `console` / `terminal` / `zsh` / `fish` are styled as command blocks. Copy is player chrome added after sanitize, so package HTML cannot inject those buttons. The tutorial panel allows text selection (`user-select: text`); the rest of the chrome stays unselectable.
+Fenced code blocks get a copy icon at the top-right of the block (Cursor-style: no header strip, no language label). Copy is player chrome added after sanitize, so package HTML cannot inject those buttons. The tutorial panel allows text selection (`user-select: text`); the rest of the chrome stays unselectable.
 
 Restricted HTML in Markdown is allowed only through the DOMPurify allowlist (headings, lists, tables, links, images, `pre`/`code`, emphasis). `http(s)` and `mailto:` links open in a new tab with `rel="noopener noreferrer"`. Relative file links are unwrapped to text; they are not a second navigation surface.
 
