@@ -109,7 +109,7 @@ Put compiled binaries and temporary files under `/tmp`.
 - Do not create `tutorial.json`.
 - Do not inline instructions, source files, or scripts in `multilab.json`.
 - Use real Markdown in `instructions.md`.
-- Put screenshots in `assets/` or beside `instructions.md`; use package-relative `png`/`jpeg`/`gif`/`webp`/`bmp` paths, not remote URLs.
+- Put diagrams in `assets/` or beside `instructions.md`; use package-relative `png`/`jpeg`/`gif`/`webp`/`bmp`/`svg` paths (`![alt](assets/flow.svg)`). Do not paste inline `<svg>` into Markdown HTML.
 - Tag copyable shell examples as `bash` fences.
 - Use real editable files under `files/`.
 - Use command scripts referenced from `commands[]`.

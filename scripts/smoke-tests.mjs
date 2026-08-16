@@ -15,7 +15,7 @@ import { fileURLToPath } from 'url';
 
 import { normalizePanels, FALLBACK_PANELS } from '../server/services/PanelModel.js';
 import { createDefaultKernelRegistry, packageNeedsNetwork } from '../server/services/KernelRegistry.js';
-import { PackageService, validateWorkspaceRelPath } from '../server/services/PackageService.js';
+import { PackageService, validateWorkspaceRelPath, contentAssetResponseHeaders } from '../server/services/PackageService.js';
 import { SaveService } from '../server/services/SaveService.js';
 import {
   WorkspaceService,
@@ -355,6 +355,7 @@ await test('PackageService.resolveContentAsset serves package images only', asyn
       steps: [{ id: '01-intro', title: 'Intro', inherit_mode: 'template', commands: [] }],
     }));
     await fs.writeFile(path.join(pkg, 'assets', 'dot.png'), PNG_1X1);
+    await fs.writeFile(path.join(pkg, 'assets', 'flow.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>\n');
     await fs.writeFile(path.join(pkg, 'steps', '01-intro', 'local.png'), PNG_1X1);
     await fs.writeFile(path.join(pkg, 'assets', 'run.sh'), '#!/bin/bash\ntrue\n');
     const packageService = new PackageService({ tutorialsDir: tmp });
@@ -362,6 +363,12 @@ await test('PackageService.resolveContentAsset serves package images only', asyn
     const fromRoot = await packageService.resolveContentAsset('asset-lab', 'assets/dot.png');
     assert.equal(fromRoot.contentType, 'image/png');
     assert.equal(fromRoot.relPath, 'assets/dot.png');
+
+    const svg = await packageService.resolveContentAsset('asset-lab', 'assets/flow.svg');
+    assert.equal(svg.contentType, 'image/svg+xml');
+    const svgHeaders = contentAssetResponseHeaders(svg.contentType);
+    assert.equal(svgHeaders['Content-Type'], 'image/svg+xml');
+    assert.match(svgHeaders['Content-Security-Policy'], /sandbox/);
 
     const fromStep = await packageService.resolveContentAsset('asset-lab', 'local.png', {
       stepId: '01-intro',

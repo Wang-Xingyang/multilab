@@ -33,7 +33,7 @@ STEP_ID_RE = re.compile(r'^\d{2}-[a-z][a-z0-9-]*$')
 CHAIN_ID_RE = re.compile(r'^[a-z][a-z0-9-]*$')
 IMG_MD_RE = re.compile(r'!\[[^\]]*\]\(([^)]+)\)')
 IMG_HTML_RE = re.compile(r'<img\b[^>]*\bsrc=["\']([^"\']+)["\']', re.I)
-CONTENT_ASSET_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'}
+CONTENT_ASSET_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'}
 
 
 def looks_like_url(src):
@@ -50,14 +50,14 @@ def check_instruction_assets(text, step_dir, tutorial_dir, step_id, warnings):
             if src.startswith(('http://', 'https://', '//')):
                 warnings.append(
                     f"step '{step_id}': remote image '{src}' will not be loaded "
-                    "(use a package-relative png/jpeg/gif/webp/bmp)"
+                    "(use a package-relative png/jpeg/gif/webp/bmp/svg)"
                 )
             continue
         ext = Path(src.split('?', 1)[0]).suffix.lower()
         if ext and ext not in CONTENT_ASSET_EXTS:
             warnings.append(
                 f"step '{step_id}': image '{src}' uses unsupported type {ext} "
-                "(png/jpeg/gif/webp/bmp)"
+                "(png/jpeg/gif/webp/bmp/svg)"
             )
         escaped = False
         found = False

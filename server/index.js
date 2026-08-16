@@ -14,7 +14,7 @@ import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { DockerRuntimeProvider } from './runtime/DockerRuntimeProvider.js';
 import { RuntimeManager } from './runtime/RuntimeManager.js';
-import { PackageService } from './services/PackageService.js';
+import { PackageService, contentAssetResponseHeaders } from './services/PackageService.js';
 import { SaveService } from './services/SaveService.js';
 import { WorkspaceService } from './services/WorkspaceService.js';
 import { CommandService } from './services/CommandService.js';
@@ -418,9 +418,7 @@ app.get('/api/tutorials/:id/assets', async (req, res) => {
     if (!relPath) return res.status(400).json({ error: 'path required' });
     const stepId = typeof req.query.step === 'string' && req.query.step ? req.query.step : undefined;
     const asset = await packageService.resolveContentAsset(req.params.id, relPath, { stepId });
-    res.setHeader('Content-Type', asset.contentType);
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Cache-Control', 'private, no-store');
+    res.set(contentAssetResponseHeaders(asset.contentType));
     res.sendFile(asset.absPath);
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message });

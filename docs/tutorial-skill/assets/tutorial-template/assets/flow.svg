@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="48" viewBox="0 0 320 48" role="img" aria-label="edit, compile, run">
+  <rect x="1" y="8" width="88" height="32" rx="4" fill="none" stroke="#356a9e" stroke-width="2"/>
+  <text x="45" y="29" text-anchor="middle" font-size="13" font-family="sans-serif" fill="#356a9e">edit</text>
+  <line x1="89" y1="24" x2="115" y2="24" stroke="#356a9e" stroke-width="2"/>
+  <polygon points="115,18 127,24 115,30" fill="#356a9e"/>
+  <rect x="127" y="8" width="88" height="32" rx="4" fill="none" stroke="#356a9e" stroke-width="2"/>
+  <text x="171" y="29" text-anchor="middle" font-size="13" font-family="sans-serif" fill="#356a9e">compile</text>
+  <line x1="215" y1="24" x2="241" y2="24" stroke="#356a9e" stroke-width="2"/>
+  <polygon points="241,18 253,24 241,30" fill="#356a9e"/>
+  <rect x="253" y="8" width="66" height="32" rx="4" fill="none" stroke="#356a9e" stroke-width="2"/>
+  <text x="286" y="29" text-anchor="middle" font-size="13" font-family="sans-serif" fill="#356a9e">run</text>
+</svg>

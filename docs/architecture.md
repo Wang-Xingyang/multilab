@@ -120,16 +120,17 @@ The left tutorial panel is rendered by `public/js/content-renderer.js`, not by `
 ```text
 instructions.md
   marked (GFM)
-  DOMPurify allowlist (no script/iframe/form/svg/button)
+  DOMPurify allowlist (no script/iframe/form/inline svg/button)
   rewrite <img src> to GET /api/tutorials/:source_key/assets?path=&step=
   wrap <pre> with copy chrome (player UI, after sanitize)
 ```
 
 Image rules:
 
-- Package-relative paths resolve first against `steps/<step-id>/`, then the package root. `./diagram.png` and `assets/overview.png` both work. `..` is allowed only while the result stays inside the package.
-- Allowed types: png, jpeg, gif, webp, bmp. SVG is not served (opening the asset URL as a document would run package script on the MultiLab origin).
-- Remote `http(s)` images are dropped (local-first; untrusted packages must not phone home via `<img>`).
+- Package-relative paths resolve first against `steps/<step-id>/`, then the package root. `./diagram.svg` and `assets/overview.png` both work. `..` is allowed only while the result stays inside the package.
+- Allowed types: png, jpeg, gif, webp, bmp, **svg**. Use `![alt](assets/flow.svg)`. Inline `<svg>` in Markdown HTML is still stripped (that would inject into the player DOM); package SVG files are served as `<img>`.
+- Asset responses send `Content-Security-Policy: default-src 'none'; sandbox` so opening the asset URL as a document cannot run package script. `<img>` still paints SVG.
+- Remote `http(s)` images are dropped (local-first).
 - Inline `data:image/png|jpeg|gif|webp;base64,...` is kept. Other `data:` / `javascript:` URLs are dropped.
 - Assets come from the tutorial package, never from the live workspace or host save.
 

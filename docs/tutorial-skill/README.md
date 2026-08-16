@@ -6,6 +6,7 @@ Current format:
 
 ```text
 multilab.json
+assets/                 # optional diagrams (png/jpeg/gif/webp/bmp/svg)
 steps/<id>/instructions.md
 steps/<id>/files/
 steps/<id>/commands/
@@ -66,3 +67,4 @@ Then edit:
 - `steps/01-example/files/main.c`
 - `steps/01-example/commands/run.sh`
 - `steps/01-example/commands/test.sh`
+- optional `assets/*.svg` (or png/jpeg/gif/webp/bmp) referenced from Markdown as `![alt](assets/flow.svg)`

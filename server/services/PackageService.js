@@ -13,8 +13,7 @@ const MANIFEST_FILE = 'multilab.json';
 const VALID_INHERIT_MODES = new Set(['template', 'previous_save', 'overlay_template']);
 const INSTALLED_SOURCE_PREFIX = 'pkg-';
 
-/** Tutorial Markdown images only. SVG is omitted: opening the asset URL as a
- *  document would run package SVG script as the MultiLab origin. */
+/** Tutorial Markdown images from the package (`<img src>`), including SVG. */
 export const CONTENT_ASSET_MIME = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -22,8 +21,20 @@ export const CONTENT_ASSET_MIME = {
   '.gif': 'image/gif',
   '.webp': 'image/webp',
   '.bmp': 'image/bmp',
+  '.svg': 'image/svg+xml',
 };
 export const MAX_CONTENT_ASSET_BYTES = 5 * 1024 * 1024;
+
+/** Headers for GET /api/tutorials/:id/assets. CSP sandbox lets <img> paint
+ *  SVG while opening the asset URL as a document cannot run package script. */
+export function contentAssetResponseHeaders(contentType) {
+  return {
+    'Content-Type': contentType,
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': 'private, no-store',
+    'Content-Security-Policy': "default-src 'none'; sandbox",
+  };
+}
 
 export function validateId(id) {
   if (!id || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$/.test(id)) {

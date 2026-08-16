@@ -9,7 +9,7 @@ There is no supported `tutorial.json` format.
 ```text
 tutorials/<id>/
   multilab.json
-  assets/                 # optional screenshots (png/jpeg/gif/webp/bmp)
+  assets/                 # optional diagrams/screenshots (png/jpeg/gif/webp/bmp/svg)
   steps/
     01-<slug>/
       instructions.md
@@ -134,14 +134,15 @@ Package template files are read-only learning material. Learner edits live in th
 Supported content:
 
 - GFM Markdown (headings, lists, tables, quotes, emphasis, links, images, fenced code).
-- Restricted HTML through the player's sanitizer. Do not rely on `<script>`, `<iframe>`, `<form>`, inline SVG, or event-handler attributes; they are stripped.
-- Package-relative images: `png`, `jpeg`, `gif`, `webp`, `bmp`. SVG is not served.
+- Restricted HTML through the player's sanitizer. Do not rely on `<script>`, `<iframe>`, `<form>`, inline `<svg>`, or event-handler attributes; they are stripped.
+- Package-relative images: `png`, `jpeg`, `gif`, `webp`, `bmp`, `svg`. Use `![alt](assets/flow.svg)`. Do not paste inline `<svg>` into Markdown HTML.
 
 Image paths are resolved relative to the step directory first, then the package root:
 
 ```text
 ![Diagram](diagram.png)           # steps/<id>/diagram.png
 ![Overview](assets/overview.png)  # <package>/assets/overview.png
+![Flow](assets/flow.svg)          # SVG via <img>, not inline <svg> HTML
 ```
 
 Remote `http(s)` images are not loaded. Put screenshots in the package so the tutorial stays local-first.
