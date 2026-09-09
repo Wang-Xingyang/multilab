@@ -11,8 +11,8 @@ import { apiJson, apiGet } from './api.js';
 import { toast, status, escapeAttr } from './ui.js';
 import { t } from './messages.js';
 import { appendSessionLog } from './session-log.js';
-import { normalizeProgress, stepIndexFromId } from './progress.js';
 import { applyPanelLayout, applyProgress, applyProgressToUi, applyStepCommands } from './panels.js';
+import { normalizeProgress, stepIndexFromId, applyStepAccess } from './progress.js';
 import { renderTrustButton, refreshKernelResolution } from './kernel.js';
 import { loadFilesIntoEditor, saveCurrentStep } from './files.js';
 import { handleError } from './errors.js';
@@ -93,7 +93,9 @@ export async function loadTutorialList(opts = {}) {
 
 export async function loadTutorial(id) {
   try {
-    if (state.currentTutorial) await saveCurrentStep({ silent: true, force: true });
+    if (state.currentTutorial && state.currentStepAccess?.editable) {
+      await saveCurrentStep({ silent: true, force: true });
+    }
     state.currentTutorial = await apiGet(`/api/tutorials/${encodeURIComponent(id)}`);
     if (!state.currentTutorial || !state.currentTutorial.steps?.length) throw new Error(t('tutorial.invalidData'));
     state.previewForcedOpen = false;
@@ -126,7 +128,9 @@ export async function enterStep(targetIndex, opts = {}) {
   try {
     document.getElementById('prev-step').disabled = true;
     document.getElementById('next-step').disabled = true;
-    if (!opts.skipSave) await saveCurrentStep({ silent: true, force: true });
+    if (!opts.skipSave && state.currentStepAccess?.editable) {
+      await saveCurrentStep({ silent: true, force: true });
+    }
     status(t('tutorial.loadingStep'));
     const step = state.currentTutorial.steps[targetIndex];
     const result = await apiJson('/api/steps/load', { tutorial: currentTutorialKey(), step: step.id });
@@ -136,6 +140,7 @@ export async function enterStep(targetIndex, opts = {}) {
     state.currentStep = targetIndex;
     state.previewForcedOpen = false;
     applyProgress(result.progress);
+    applyStepAccess(result);
     loadFilesIntoEditor(result.files || [], {
       ui: result.ui,
       entryFile: step.entry_file,

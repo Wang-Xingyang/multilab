@@ -1,6 +1,17 @@
+import { state } from './state.js';
+
 export function normalizeProgress(progress) {
   if (!progress || typeof progress !== 'object') {
-    return { current_step: null, visited: [], test_passed: {}, updated_at: null };
+    return {
+      current_step: null,
+      visited: [],
+      test_passed: {},
+      test_hash: {},
+      completed: {},
+      editable: {},
+      entered_editable: {},
+      updated_at: null,
+    };
   }
   return {
     current_step: progress.current_step || null,
@@ -8,8 +19,34 @@ export function normalizeProgress(progress) {
     test_passed: progress.test_passed && typeof progress.test_passed === 'object'
       ? { ...progress.test_passed }
       : {},
+    test_hash: progress.test_hash && typeof progress.test_hash === 'object'
+      ? { ...progress.test_hash }
+      : {},
+    completed: progress.completed && typeof progress.completed === 'object'
+      ? { ...progress.completed }
+      : {},
+    editable: progress.editable && typeof progress.editable === 'object'
+      ? { ...progress.editable }
+      : {},
+    entered_editable: progress.entered_editable && typeof progress.entered_editable === 'object'
+      ? { ...progress.entered_editable }
+      : {},
     updated_at: progress.updated_at || null,
   };
+}
+
+export function applyStepAccess(result) {
+  if (!result) return;
+  state.currentStepAccess = {
+    editable: Boolean(result.editable),
+    needs_edit: result.needs_edit !== false,
+    has_solution: Boolean(result.has_solution),
+    complete: Boolean(result.complete),
+    generation: result.generation ?? null,
+  };
+  if (state.editor) {
+    state.editor.updateOptions({ readOnly: !state.currentStepAccess.editable });
+  }
 }
 
 export function stepIndexFromId(tutorial, stepId) {

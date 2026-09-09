@@ -1,6 +1,7 @@
-import { state, TERM_THEME } from './state.js';
+import { state, TERM_THEME, currentTutorialKey, currentStepObj } from './state.js';
 import { toast, status } from './ui.js';
 import { t } from './messages.js';
+import { applyStepCommands } from './panels.js';
 
 // Callback fired when the host reports a real filesystem change (WS
 // 'fs_change'). Wired by app.js to trigger a file-tree refresh.
@@ -34,8 +35,16 @@ export function initTerminal() {
     if (state.fitAddon) state.fitAddon.fit();
     window.addEventListener('resize', () => state.fitAddon && state.fitAddon.fit());
     state.term.onData((data) => {
+      const writable = Boolean(state.currentStepAccess?.editable) || Boolean(state.commandBusy);
+      if (!writable) return;
       if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-        state.ws.send(JSON.stringify({ type: 'input', data }));
+        state.ws.send(JSON.stringify({
+          type: 'input',
+          data,
+          tutorial: currentTutorialKey(),
+          step: currentStepObj()?.id,
+          generation: state.currentStepAccess?.generation,
+        }));
       }
     });
   } catch (e) {
@@ -55,14 +64,24 @@ export function initWS() {
   }
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   state.ws = new WebSocket(`${proto}://${location.host}/ws`);
-  state.ws.onopen = () => status(t('ws.connected'));
+  state.ws.onopen = () => {
+    state.commandBusy = false;
+    applyStepCommands();
+    status(t('ws.connected'));
+  };
   state.ws.onmessage = (e) => {
     let msg; try { msg = JSON.parse(e.data); } catch { return; }
     if (msg.type === 'output') { if (state.term) state.term.write(msg.data); }
+    else if (msg.type === 'command_done') {
+      state.commandBusy = false;
+      applyStepCommands();
+    }
     else if (msg.type === 'fs_change') { if (fsChangeCallback) fsChangeCallback(); }
     else if (msg.type === 'status') status(msg.message);
     else if (msg.type === 'ready') status(t('ws.ready'));
     else if (msg.type === 'error') {
+      state.commandBusy = false;
+      applyStepCommands();
       if (msg.code === 'runtime_replaced') {
         toast(t('ws.runtimeReplaced'));
         reconnectWS({ reason: 'runtime replaced' });

@@ -1,4 +1,4 @@
-import { state, currentStepObj, currentTutorialKey, stepCommand } from './state.js';
+import { state, currentStepObj, currentTutorialKey, stepCommand, stepAccessWritable } from './state.js';
 import { apiJson } from './api.js';
 import { toast, status } from './ui.js';
 import { t } from './messages.js';
@@ -6,27 +6,41 @@ import { appendSessionLog } from './session-log.js';
 import { handleError } from './errors.js';
 import {
   applyProgress,
+  applyStepCommands,
   showTestResults,
   showPreviewContent,
   revealAuxPanel,
 } from './panels.js';
 import { saveCurrentStep, refreshFileTree } from './files.js';
 
+function wsCommandPayload(command) {
+  const step = currentStepObj();
+  return {
+    type: 'command',
+    tutorial: currentTutorialKey(),
+    step: step.id,
+    command: command.id || command.type,
+    generation: state.currentStepAccess?.generation,
+  };
+}
+
 export async function runCode() {
   if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
     toast(t('commands.wsDisconnected'), true);
     return;
   }
-  if (!state.currentTutorial) return;
-  try {
-    await saveCurrentStep({ silent: true, force: true });
-  } catch (e) {
-    handleError(e, {
-      feature: 'commands',
-      message: t('commands.saveBeforeRunFailed', { error: e.message }),
-      notify: true,
-    });
-    return;
+  if (!state.currentTutorial || state.commandBusy) return;
+  if (state.currentStepAccess?.editable) {
+    try {
+      await saveCurrentStep({ silent: true, force: true });
+    } catch (e) {
+      handleError(e, {
+        feature: 'commands',
+        message: t('commands.saveBeforeRunFailed', { error: e.message }),
+        notify: true,
+      });
+      return;
+    }
   }
   const step = currentStepObj();
   const command = stepCommand(step, 'run');
@@ -34,24 +48,22 @@ export async function runCode() {
     toast(t('commands.noRunCommand'), true);
     return;
   }
-  state.ws.send(JSON.stringify({
-    type: 'command',
-    tutorial: currentTutorialKey(),
-    step: step.id,
-    command: command.id || command.type,
-  }));
+  state.commandBusy = true;
+  applyStepCommands();
+  state.ws.send(JSON.stringify(wsCommandPayload(command)));
 }
 
 export async function runTest() {
   const step = currentStepObj();
   const command = stepCommand(step, 'test');
-  if (!state.currentTutorial || !command) return;
+  if (!state.currentTutorial || !command || !stepAccessWritable()) return;
   try {
     await saveCurrentStep({ silent: true, force: true });
     const res = await apiJson('/api/commands/run', {
       tutorial: currentTutorialKey(),
       step: step.id,
       command: command.id || command.type,
+      generation: state.currentStepAccess?.generation,
     });
     const color = res.passed ? '\x1b[32m' : '\x1b[31m';
     state.term.write(`\r\n${color}[${res.passed ? 'PASS' : 'FAIL'}]\x1b[0m\r\n${res.output || ''}\r\n`);
@@ -75,20 +87,19 @@ export async function runTest() {
 export async function runPreview() {
   const step = currentStepObj();
   const command = stepCommand(step, 'preview');
-  if (!state.currentTutorial || !command) return;
+  if (!state.currentTutorial || !command || state.commandBusy) return;
   try {
-    await saveCurrentStep({ silent: true, force: true });
+    if (state.currentStepAccess?.editable) {
+      await saveCurrentStep({ silent: true, force: true });
+    }
     if (command.terminal === 'interactive') {
       if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
         toast(t('commands.wsDisconnected'), true);
         return;
       }
-      state.ws.send(JSON.stringify({
-        type: 'command',
-        tutorial: currentTutorialKey(),
-        step: step.id,
-        command: command.id || command.type,
-      }));
+      state.commandBusy = true;
+      applyStepCommands();
+      state.ws.send(JSON.stringify(wsCommandPayload(command)));
       document.getElementById('pane-web-preview').innerHTML =
         `<div class="aux-empty"><span>${t('commands.previewInteractiveHint')}</span></div>`;
       revealAuxPanel('web-preview');
@@ -100,6 +111,7 @@ export async function runPreview() {
       tutorial: currentTutorialKey(),
       step: step.id,
       command: command.id || command.type,
+      generation: state.currentStepAccess?.generation,
     });
     await showPreviewContent(res);
     toast(

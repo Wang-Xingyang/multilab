@@ -10,12 +10,13 @@
  * This module re-exports the file-tree / file-picker public API so that
  * app.js keeps importing everything from './files.js'.
  */
-import { state, currentStepObj, currentTutorialKey } from './state.js';
+import { state, currentStepObj, currentTutorialKey, stepAccessWritable } from './state.js';
 import { apiJson } from './api.js';
 import { toast } from './ui.js';
 import { t } from './messages.js';
 import { appendSessionLog } from './session-log.js';
 import { applyProgress, panelDeclared } from './panels.js';
+import { applyStepAccess } from './progress.js';
 import { handleError } from './errors.js';
 import {
   setFileTreeOpenHandler,
@@ -49,6 +50,7 @@ function setEditorEmpty(message = t('files.emptyEditor')) {
   state.suppressModified = true;
   state.editor.setValue(message);
   monaco.editor.setModelLanguage(state.editor.getModel(), state.currentTutorial?.language || 'plaintext');
+  state.editor.updateOptions({ readOnly: !state.currentStepAccess?.editable });
   state.suppressModified = false;
 }
 
@@ -89,6 +91,9 @@ function loadFilesIntoEditor(files, { ui, entryFile } = {}) {
     switchFile(state.activeFileIndex, true);
   } else {
     setEditorEmpty();
+  }
+  if (state.editor) {
+    state.editor.updateOptions({ readOnly: !state.currentStepAccess?.editable });
   }
   if (panelDeclared('file-tree')) refreshFileTree(true);
 }
@@ -167,6 +172,8 @@ function closeFile(idx) {
 async function saveCurrentStep(opts = {}) {
   const step = currentStepObj();
   if (!state.currentTutorial || !step) return;
+  if (!state.currentStepAccess?.editable) return;
+  if (state.commandBusy && !opts.force) return;
   syncActiveEditor();
   const hasDirty = state.fileModified.some(Boolean);
   if (!hasDirty && !opts.force) return;
@@ -175,6 +182,7 @@ async function saveCurrentStep(opts = {}) {
     step: step.id,
     files: state.currentFiles.map(f => ({ name: f.name, content: f.content })),
     ui: currentStepUi(),
+    generation: state.currentStepAccess?.generation,
   });
   state.currentFiles.forEach(f => { f.originalContent = f.content; });
   state.fileModified = state.currentFiles.map(() => false);
@@ -198,7 +206,7 @@ async function saveFile() {
 
 async function resetCurrentStep() {
   const step = currentStepObj();
-  if (!state.currentTutorial || !step) return;
+  if (!state.currentTutorial || !step || !stepAccessWritable()) return;
   const ok = await confirmDialog({
     title: t('save.resetTitle'),
     body: t('save.resetBody', { title: step.title || step.id }),
@@ -206,7 +214,12 @@ async function resetCurrentStep() {
   });
   if (!ok) return;
   try {
-    const result = await apiJson('/api/steps/reset', { tutorial: currentTutorialKey(), step: step.id });
+    const result = await apiJson('/api/steps/reset', {
+      tutorial: currentTutorialKey(),
+      step: step.id,
+      generation: state.currentStepAccess?.generation,
+    });
+    applyStepAccess(result);
     loadFilesIntoEditor(result.files || [], {
       ui: result.ui,
       entryFile: step.entry_file,
@@ -218,6 +231,38 @@ async function resetCurrentStep() {
     handleError(e, {
       feature: 'files',
       message: t('save.resetFailed', { error: e.message }),
+      notify: true,
+    });
+  }
+}
+
+async function applySolution() {
+  const step = currentStepObj();
+  if (!state.currentTutorial || !step || !stepAccessWritable() || !state.currentStepAccess?.has_solution) return;
+  const ok = await confirmDialog({
+    title: t('save.solutionTitle'),
+    body: t('save.solutionBody', { title: step.title || step.id }),
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    const result = await apiJson('/api/steps/solution', {
+      tutorial: currentTutorialKey(),
+      step: step.id,
+      generation: state.currentStepAccess?.generation,
+    });
+    applyStepAccess(result);
+    loadFilesIntoEditor(result.files || [], {
+      ui: result.ui,
+      entryFile: step.entry_file,
+    });
+    applyProgress(result.progress);
+    appendSessionLog(t('save.solutionLog', { id: step.id }), 'warn');
+    toast(t('save.solutionDone'));
+  } catch (e) {
+    handleError(e, {
+      feature: 'files',
+      message: t('save.solutionFailed', { error: e.message }),
       notify: true,
     });
   }
@@ -323,6 +368,7 @@ export {
   saveCurrentStep,
   saveFile,
   resetCurrentStep,
+  applySolution,
   workspaceRelativeName,
   openFileFromContainer,
   switchFile,

@@ -25,6 +25,7 @@ import {
 import {
   saveFile,
   resetCurrentStep,
+  applySolution,
   refreshFileTree,
   loadFilePickerList,
   closeFilePicker,
@@ -179,6 +180,7 @@ document.getElementById('diag-btn').addEventListener('click', () => {
   toggleHostDrawer();
 });
 document.getElementById('revert-btn').addEventListener('click', resetCurrentStep);
+document.getElementById('solution-btn').addEventListener('click', applySolution);
 document.getElementById('test-btn').addEventListener('click', runTest);
 document.getElementById('toggle-tutorial-btn').addEventListener('click', toggleTutorialCollapsed);
 document.getElementById('prev-step').onclick = () => {

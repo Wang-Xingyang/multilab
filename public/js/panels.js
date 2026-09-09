@@ -49,9 +49,14 @@ function applyProgressToUi() {
 
 function applyStepCommands() {
   const step = currentStepObj();
+  const writable = Boolean(state.currentStepAccess?.editable) && !state.commandBusy;
   const setShown = (id, shown) => {
     const el = document.getElementById(id);
     if (el) el.style.display = shown ? '' : 'none';
+  };
+  const setDisabled = (id, disabled) => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = Boolean(disabled);
   };
   setShown('run-btn', Boolean(stepCommand(step, 'run')));
   setShown('test-btn', Boolean(stepCommand(step, 'test')));
@@ -59,13 +64,20 @@ function applyStepCommands() {
   const terminal = panelDecl('terminal');
   setShown('interrupt-btn', Boolean(terminal && !terminal.hidden));
   const editor = panelDecl('editor');
-  setShown('revert-btn', Boolean(editor && !editor.hidden));
+  setShown('revert-btn', Boolean(writable && editor && !editor.hidden));
+  setShown('solution-btn', Boolean(writable && state.currentStepAccess?.has_solution));
+  setDisabled('run-btn', state.commandBusy);
+  setDisabled('preview-btn', state.commandBusy);
+  setDisabled('test-btn', !writable);
+  setDisabled('revert-btn', !writable);
+  setDisabled('solution-btn', !writable);
 }
 
 function applyProgress(progress) {
   if (!progress) return;
   state.currentProgress = normalizeProgress(progress);
   applyProgressToUi();
+  applyStepCommands();
 }
 
 function applyPanelLayout() {

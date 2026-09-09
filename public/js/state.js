@@ -1,5 +1,22 @@
 /** Shared mutable UI/runtime state for no-bundler modules. */
-const EMPTY_PROGRESS = { current_step: null, visited: [], test_passed: {}, updated_at: null };
+export const EMPTY_PROGRESS = {
+  current_step: null,
+  visited: [],
+  test_passed: {},
+  test_hash: {},
+  completed: {},
+  editable: {},
+  entered_editable: {},
+  updated_at: null,
+};
+
+export const EMPTY_STEP_ACCESS = {
+  editable: false,
+  needs_edit: true,
+  has_solution: false,
+  complete: false,
+  generation: null,
+};
 
 export const state = {
   ws: null,
@@ -9,6 +26,8 @@ export const state = {
   currentTutorial: null,
   currentStep: 0,
   currentProgress: EMPTY_PROGRESS,
+  currentStepAccess: { ...EMPTY_STEP_ACCESS },
+  commandBusy: false,
   theme: (typeof localStorage !== 'undefined' && localStorage.getItem('multilab-theme')) || 'dark',
   currentFiles: [],
   activeFileIndex: 0,
@@ -58,6 +77,10 @@ export function currentStepObj() {
 
 export function currentTutorialKey() {
   return state.currentTutorial?.source_key || state.currentTutorial?.id;
+}
+
+export function stepAccessWritable() {
+  return Boolean(state.currentStepAccess?.editable) && !state.commandBusy;
 }
 
 export function stepCommand(step, type) {
