@@ -257,6 +257,14 @@ def validate(tutorial_dir):
         inherit_mode = step.get('inherit_mode')
         if inherit_mode not in VALID_INHERIT_MODES:
             errors.append(f"step '{step_id}': inherit_mode must be one of {sorted(VALID_INHERIT_MODES)}")
+        if inherit_mode in ('previous_save', 'overlay_template') and not chain:
+            errors.append(f"step '{step_id}': inherit_mode '{inherit_mode}' requires chain")
+
+        needs_edit = step.get('needs_edit', True)
+        if needs_edit not in (True, False):
+            errors.append(f"step '{step_id}': needs_edit must be a boolean")
+        if needs_edit is False and chain:
+            warnings.append(f"step '{step_id}': lecture/demo steps should stay out of chain")
 
         check_panel_list(step.get('panels'), f"step '{step_id}' panels", errors, warnings)
         if step.get('panels'):

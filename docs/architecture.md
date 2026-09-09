@@ -88,13 +88,17 @@ The player lists both. A learner-only install can point `TUTORIALS_DIR` at an em
 ```text
 tutorials/hello-c/
   multilab.json
+  assets/
   steps/
-    01-first-program/
-      instructions.md
-      files/
-        hello.c
-      run.sh
-      test.sh
+    01-watch-hello/          # lecture/demo, preview only
+    02-first-program/        # template + chain + test
+    03-keep-hello/           # previous_save
+    04-add-header/           # overlay_template + generated HTML preview
+    05-args/                 # independent template, not in chain
+    06-gdb/
+    07-chain-note/           # lecture, stays out of chain
+    08-no-test-handoff/      # previous_save, run only
+    09-overlay-notes/
 ```
 
 Package loading is handled by `server/services/PackageService.js`. It owns package source resolution, manifest loading, deterministic package digest calculation, step content assembly, command script lookup, and tutorial-panel content assets (`resolveContentAsset`).
@@ -228,13 +232,18 @@ Command execution is coordinated by `server/services/CommandService.js`. Before 
 
 ```text
 User clicks Run
-  frontend saveCurrentStep()
-  frontend sends ws { type: "command", tutorial, step, command }
+  frontend saveCurrentStep() if the step is editable
+  frontend sends ws { type: "command", tutorial, step, command, generation }
   backend loads command script from manifest
   backend writes script to /tmp/<step>.<command>.sh in the container
-  backend writes "bash /tmp/<step>.<command>.sh" to the persistent shell
-  xterm displays output
+  backend runs it in a dedicated exec PTY (RuntimeSession.attachCommand)
+  command output streams to xterm; stdin goes to the command PTY
+  exec stream end + inspected exit code → ws { type: "command_done", exitCode }
 ```
+
+Declared interactive commands do not run inside the persistent learner shell.
+When a step is not editable, that shell accepts no stdin. Run is still allowed:
+stdin is routed to the command PTY only while it is active.
 
 ### Captured Command Flow
 
@@ -285,38 +294,37 @@ The shell runs as `student` in:
 /home/student/workspace
 ```
 
-Terminal input is forwarded directly to shell stdin. This supports interactive tools such as gdb, REPLs, and programs that read stdin.
+When the current step is editable, terminal input goes to the persistent shell (gdb, REPLs, arbitrary commands). When it is not editable, the persistent shell accepts no stdin. While a declared command is running, stdin goes to that command PTY instead.
 
 Docker hijack streams are decoded with dockerode's `container.modem.demuxStream()`.
 
 ## Step State
 
-Each step has:
+Each step has a package **template** (`steps/<id>/files/`), an optional **solution**, and — only after it becomes editable — a learner **archive** on the host save.
 
-- `template`: package files under `steps/<id>/files/` (read-only);
-- `save`: durable learner files for this step, owned by `SaveService`;
-- `ui`: per-step editor/layout state (`open_files`, `active_file`, plus reserved keys for later preview panes);
-- `workspace`: live scratch files for the **current step only**, owned by `WorkspaceService` inside the Docker lab;
-- `inherit_mode`: first-entry initialization rule.
+Author flags:
 
-Supported `inherit_mode` values:
+- `needs_edit` (default true): exercise vs lecture/demo. Lecture/demo never get an archive.
+- `inherit_mode`: built-in archive constructor (`template` / `previous_save` / `overlay_template`). Authors do not write constructor code. `previous_save` and `overlay_template` require `chain`. Lecture/demo stay out of `chain`.
 
-```text
-template
-  initialize from this step's own files
+Runtime flags:
 
-previous_save
-  initialize from the nearest previous save in the same chain
+- complete / incomplete
+- editable / not editable (`needs_edit` only; sticky once true)
 
-overlay_template
-  initialize from previous save, then add missing files from this step's template
-```
+Only tutorial step 0 starts editable, and only if it `needs_edit`. A still-not-editable exercise becomes editable when **every previous tutorial step is complete**. Already-editable steps stay editable if an earlier step later becomes incomplete.
 
-Current implementation intentionally does not overwrite learner files during `overlay_template`.
+Completion:
 
-Step load/save/reset is handled by `server/services/SaveService.js`. It owns save identity paths, host save file IO, first-entry inheritance, reset behavior, and progress metadata. On bind-mount, the step `files/` directory is the workspace: load retargets `/home/student/workspace`, save flushes editor buffers into that directory, and reset rewrites template files in place. On copy (Windows), load writes only that step into the container; save snapshots the live workspace back onto the host save.
+- lecture/demo: on enter, and only if every previous step is already complete. Browse-ahead does not complete it. Run is allowed. No archive.
+- exercise with a test: archive passes that test (`test_passed` paired with `test_hash`)
+- exercise without a test: entered while already editable
 
-`WorkspaceService` owns workspace initialization, scoped file IO (`/api/fs/*`), snapshot, export, and watch. File APIs and the WebSocket `fs_change` watcher go through this service rather than talking to Docker directly. Bind-mount step load falls back to a container-root wipe when host `rm` hits `EACCES`. Export/import of `.mlab-save` always packs the host save after snapshotting the live step — never zip the container blindly.
+Not editable / lecture / demo: inject template into an ephemeral preview directory (not packed into `.mlab-save`). Monaco and persist APIs are read-only. Persistent bash accepts no stdin. Declared Run may take stdin for the running program only.
+
+Editable: inject the archive. Constructor runs once on first enter after it became editable. 重做 re-runs the constructor. 看答案 replaces the archive, clears test status, and does not auto-complete.
+
+`SaveService` owns this machine, host archive IO, preview paths, and write/command/shell gates. `WorkspaceService` still owns live workspace IO.
 
 ## Save Storage
 

@@ -102,30 +102,28 @@ Required:
 
 Optional:
 
-- `chain`: group id for continuous projects.
+- `chain`: group id for archive constructors on continuous projects. Lecture/demo stay out of `chain`.
+- `needs_edit`: default `true`. Set `false` for lecture/demo steps (no archive; Run is still allowed).
 - `entry_file`: default editor tab when this step has no saved UI state. The player does not open every workspace file.
 
 ## `inherit_mode`
 
-`inherit_mode` controls how a step initializes on first entry.
+`inherit_mode` selects a built-in archive constructor. It runs once when a needs-edit step first becomes editable and the learner enters it. 重做 runs it again. Authors do not write constructor code.
 
 ```text
 template
-  Use this step's own files.
-  Good for independent exercises.
+  Copy this step's files/ into the archive.
 
 previous_save
-  Use the nearest previous save in the same chain.
-  Good for continuous projects.
+  Copy the nearest earlier archive in the same chain. Requires chain.
 
 overlay_template
-  Use previous save, then add missing files from this step's template.
-  Good when a later project step introduces new assets.
+  previous_save, then add missing files from this step's files/. Requires chain.
 ```
 
-Current implementation does not overwrite learner files during `overlay_template`.
+`overlay_template` does not overwrite learner files.
 
-Package template files are read-only learning material. Learner edits live in the workspace and persist into the save. Command scripts still run against the runtime workspace path (currently `/home/student/workspace` for Docker kernels).
+Read-only preview always uses this step's full `files/` tree, even for chain steps. The constructor is what pulls in the previous archive.
 
 ## Markdown And Assets
 

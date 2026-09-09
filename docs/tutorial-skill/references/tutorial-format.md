@@ -72,6 +72,7 @@ Required:
 
 Optional:
 
+- `needs_edit` (default true; set false for lecture/demo)
 - `chain`
 - `entry_file`
 - `panels` (subset/replacement of package `default_panels` for this step)

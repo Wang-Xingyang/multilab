@@ -63,7 +63,8 @@ Each step must include:
 
 - `id`
 - `title`
-- `inherit_mode`
+- `inherit_mode` (`template` / `previous_save` / `overlay_template`)
+- `needs_edit` (default true; `false` for lecture/demo, which never get an archive)
 - `commands`
 
 Each command should include:
@@ -86,7 +87,7 @@ Supported command types:
 
 ## Command Rules
 
-Use `terminal: "interactive"` for commands that should run in the persistent terminal, usually `run`.
+Use `terminal: "interactive"` for commands that should run in a dedicated command PTY, usually `run`. When a step is not editable, the persistent bash accepts no stdin; Run still works.
 
 Use `terminal: "captured"` for commands that should return structured output, usually `test` or `check`.
 
