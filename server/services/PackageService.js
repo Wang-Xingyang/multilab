@@ -76,6 +76,18 @@ export function stepInheritMode(step) {
   return step.chain ? 'previous_save' : 'template';
 }
 
+export function stepNeedsEdit(step) {
+  return step?.needs_edit !== false;
+}
+
+export function stepHasTest(step) {
+  return (step?.commands || []).some(cmd => cmd && cmd.type === 'test');
+}
+
+export function stepChain(step) {
+  return typeof step?.chain === 'string' && step.chain ? step.chain : null;
+}
+
 export function findStep(cfg, stepId) {
   const step = (cfg.steps || []).find(s => s.id === stepId);
   if (!step) throw Object.assign(new Error(`step not found: ${stepId}`), { statusCode: 404 });
@@ -119,6 +131,36 @@ async function pathExists(filePath) {
   } catch {
     return false;
   }
+}
+
+async function readWorkspaceTree(rootDir, languageFallback) {
+  const files = [];
+  async function walk(dir, relative) {
+    const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (entry.name === '.' || entry.name === '..' || entry.isSymbolicLink()) continue;
+      const childRel = relative ? `${relative}/${entry.name}` : entry.name;
+      try {
+        validateWorkspaceRelPath(childRel);
+      } catch {
+        continue;
+      }
+      if (entry.isDirectory()) {
+        files.push({ name: childRel, type: 'dir' });
+        await walk(path.join(dir, entry.name), childRel);
+      } else if (entry.isFile()) {
+        const ext = path.extname(childRel).toLowerCase();
+        files.push({
+          name: childRel,
+          type: 'file',
+          content: await fs.readFile(path.join(dir, entry.name), 'utf8'),
+          language: LANG_BY_EXT[ext] || languageFallback || 'plaintext',
+        });
+      }
+    }
+  }
+  await walk(rootDir, '');
+  return files.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 async function readJsonFile(filePath) {
@@ -259,6 +301,7 @@ export class PackageService {
       validateSafePath(step.id);
       const stepDir = path.join(tutorialDir, 'steps', step.id);
       step.inherit_mode = stepInheritMode(step);
+      step.needs_edit = stepNeedsEdit(step);
       step.ui_panels = resolveStepPanels(cfg.ui_panels, step.panels);
 
       try {
@@ -267,24 +310,9 @@ export class PackageService {
         step.instructions = '';
       }
 
-      step.files = [];
-      const filesDir = path.join(stepDir, 'files');
-      try {
-        const entries = await fs.readdir(filesDir, { withFileTypes: true });
-        for (const e of entries) {
-          if (!e.isFile()) continue;
-          validateFileName(e.name);
-          const content = await fs.readFile(path.join(filesDir, e.name), 'utf8');
-          const ext = path.extname(e.name).toLowerCase();
-          step.files.push({
-            name: e.name,
-            content,
-            language: LANG_BY_EXT[ext] || cfg.language || 'plaintext',
-          });
-        }
-      } catch {
-        // files/ is optional for now; empty steps are represented as [].
-      }
+      step.files = await readWorkspaceTree(path.join(stepDir, 'files'), cfg.language);
+      step.solution_files = await readWorkspaceTree(path.join(stepDir, 'solution'), cfg.language);
+      step.has_solution = step.solution_files.some(file => file.type === 'file');
 
       step.commands = await Promise.all((step.commands || []).map(async command => {
         const scriptPath = command?.script ? resolvePackagePath(tutorialDir, command.script) : null;

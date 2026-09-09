@@ -1,9 +1,13 @@
 import path from 'path';
 import fs from 'fs/promises';
+import crypto from 'crypto';
 import {
   LANG_BY_EXT,
   findStep,
   stepInheritMode,
+  stepNeedsEdit,
+  stepHasTest,
+  stepChain,
   validateSafePath,
   validateWorkspaceRelPath,
 } from './PackageService.js';
@@ -16,94 +20,106 @@ export class SaveService {
     this.runtimeStateDir = runtimeStateDir;
     this.workspaceService = workspaceService;
     this.packageService = packageService;
+    this.activeStep = null;
+    this.activeCommand = null;
+    this.nextGeneration = 1;
   }
 
   async loadStepState(tutorialId, stepId) {
+    this.assertNoCommandInProgress();
     validateSafePath(tutorialId);
     validateSafePath(stepId);
     await this.ensureSaveRootDirs();
+    await this.workspaceService.flushLiveToHost();
     const cfg = await this.packageService.loadTutorial(tutorialId);
     const step = findStep(cfg, stepId);
-    const ownSaveDir = this.saveDir(cfg, step.id);
     const mode = stepInheritMode(step);
-    let sourceStep = step.id;
-    let hasOwnSave = await dirExists(ownSaveDir);
+    let metadata = await this.readSaveMetadata(cfg);
+
+    const needsEdit = stepNeedsEdit(step);
+    let editable = needsEdit ? await this.isStepEditable(cfg, step, metadata) : false;
+    if (needsEdit && editable && !metadata.editable[step.id]) {
+      metadata = await this.writeSaveMetadata(cfg, {
+        ...metadata,
+        editable: { ...metadata.editable, [step.id]: true },
+      });
+    }
+    if (!needsEdit && await this.arePreviousStepsComplete(cfg, step, metadata)) {
+      metadata = await this.writeSaveMetadata(cfg, {
+        ...metadata,
+        completed: { ...metadata.completed, [step.id]: true },
+      });
+    }
+    if (needsEdit && editable && !stepHasTest(step) && !metadata.entered_editable[step.id]) {
+      metadata = await this.writeSaveMetadata(cfg, {
+        ...metadata,
+        entered_editable: { ...metadata.entered_editable, [step.id]: true },
+      });
+    }
+
     let files;
+    let sourceStep = step.id;
+    let workspaceHostPath;
+    let workspaceContainerPath;
+    let hasOwnSave = false;
 
-    if (hasOwnSave) {
-      files = await readHostFiles(ownSaveDir);
-    } else if (mode === 'template') {
-      await writeStepTemplateToDir(step, ownSaveDir);
-      await writeStepUi(this.stepUiPath(cfg, step.id), defaultStepUi(step));
-      files = await readHostFiles(ownSaveDir);
-      hasOwnSave = true;
-    } else {
-      const chain = stepChain(step);
-      const steps = cfg.steps || [];
-      const idx = steps.findIndex(s => s.id === step.id);
-      let sourceDir = null;
-      for (let i = idx - 1; i >= 0; i--) {
-        if (stepChain(steps[i]) !== chain) continue;
-        const prevSaveDir = this.saveDir(cfg, steps[i].id);
-        if (await dirExists(prevSaveDir)) {
-          sourceDir = prevSaveDir;
-          sourceStep = steps[i].id;
-          break;
-        }
-      }
-      if (!sourceDir) {
-        const first = findChainFirstStep(cfg, chain) || step;
-        sourceDir = this.saveDir(cfg, first.id);
-        sourceStep = first.id;
-        if (!(await dirExists(sourceDir))) {
-          await writeStepTemplateToDir(first, sourceDir);
-        }
-        hasOwnSave = first.id === step.id;
-      }
-
-      files = await readHostFiles(sourceDir);
-
-      if (mode === 'overlay_template') {
-        const byName = new Map(files.map(f => [f.name, f]));
-        for (const templateFile of step.files || []) {
-          if (!byName.has(templateFile.name)) byName.set(templateFile.name, templateFile);
-        }
-        files = Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
-      }
-
+    if (needsEdit && editable) {
+      const ownSaveDir = this.saveDir(cfg, step.id);
+      hasOwnSave = await dirExists(ownSaveDir);
       if (!hasOwnSave) {
+        const built = await this.constructArchiveFiles(cfg, step);
+        files = built.files;
+        sourceStep = built.sourceStep;
         await writeHostFiles(ownSaveDir, files);
-        await writeStepUi(this.stepUiPath(cfg, step.id), defaultStepUi(step));
+        if (!(await fileExists(this.stepUiPath(cfg, step.id)))) {
+          await writeStepUi(this.stepUiPath(cfg, step.id), defaultStepUi(step));
+        }
         hasOwnSave = true;
+      } else {
         files = await readHostFiles(ownSaveDir);
       }
+      workspaceHostPath = ownSaveDir;
+      workspaceContainerPath = this.containerSavePath(cfg, step.id);
+    } else {
+      files = cloneWorkspaceFiles(step.files);
+      const previewDir = this.previewDir(cfg, step.id);
+      await writeHostFiles(previewDir, files);
+      workspaceHostPath = previewDir;
+      workspaceContainerPath = this.containerPreviewPath(cfg, step.id);
     }
 
     await this.workspaceService.useSaveWorkspace({
       tutorialId,
-      hostPath: ownSaveDir,
-      containerPath: this.containerSavePath(cfg, step.id),
+      hostPath: workspaceHostPath,
+      containerPath: workspaceContainerPath,
       files,
     });
+    const generation = this.activateStep({
+      tutorialKey: tutorialId,
+      packageId: cfg.id,
+      stepId: step.id,
+      editable,
+    });
     const progress = await this.recordStepVisit(cfg, step.id);
-    return {
-      tutorial: tutorialId,
-      step: step.id,
-      sourceStep,
-      hasOwnSave,
-      inheritMode: mode,
+    return this.stepStatePayload(cfg, step, {
       files,
-      ui: await readStepUi(this.stepUiPath(cfg, step.id), step),
+      sourceStep,
+      inheritMode: mode,
+      editable,
+      hasOwnSave,
+      generation,
       progress,
-    };
+    });
   }
 
-  async saveStepState(tutorialId, stepId, files, { ui } = {}) {
+  async saveStepState(tutorialId, stepId, files, { ui, generation } = {}) {
+    this.assertNoCommandInProgress();
     validateSafePath(tutorialId);
     validateSafePath(stepId);
     await this.ensureSaveRootDirs();
     const cfg = await this.packageService.loadTutorial(tutorialId);
     const step = findStep(cfg, stepId);
+    this.assertStepWritable(tutorialId, step.id, { generation });
     const dest = this.saveDir(cfg, step.id);
     const providedFiles = Array.isArray(files) ? files : null;
     const normalizedFiles = (providedFiles || []).map(f => normalizeWorkspaceEntry(f));
@@ -121,19 +137,78 @@ export class SaveService {
       : await readStepUi(this.stepUiPath(cfg, step.id), step);
     await writeStepUi(this.stepUiPath(cfg, step.id), nextUi);
     const progress = await this.recordStepVisit(cfg, step.id);
-    return { tutorial: tutorialId, step: step.id, hasOwnSave: true, ui: nextUi, progress };
+    return this.stepStatePayload(cfg, step, {
+      files: await readHostFiles(dest),
+      hasOwnSave: true,
+      editable: true,
+      progress,
+      ui: nextUi,
+    });
   }
 
-  async resetStepState(tutorialId, stepId) {
+  async resetStepState(tutorialId, stepId, { generation } = {}) {
+    this.assertNoCommandInProgress();
     validateSafePath(tutorialId);
     validateSafePath(stepId);
     await this.ensureSaveRootDirs();
     const cfg = await this.packageService.loadTutorial(tutorialId);
     const step = findStep(cfg, stepId);
+    this.assertStepWritable(tutorialId, step.id, { generation });
     const dest = this.saveDir(cfg, step.id);
-    await writeStepTemplateToDir(step, dest);
+    const built = await this.constructArchiveFiles(cfg, step);
+    await writeHostFiles(dest, built.files);
     await writeStepUi(this.stepUiPath(cfg, step.id), defaultStepUi(step));
-    const files = await readHostFiles(dest);
+    const metadata = await this.readSaveMetadata(cfg);
+    const testPassed = { ...(metadata.test_passed || {}) };
+    const testHash = { ...(metadata.test_hash || {}) };
+    delete testPassed[step.id];
+    delete testHash[step.id];
+    await this.writeSaveMetadata(cfg, {
+      ...metadata,
+      test_passed: testPassed,
+      test_hash: testHash,
+    });
+    await this.workspaceService.useSaveWorkspace({
+      tutorialId,
+      hostPath: dest,
+      containerPath: this.containerSavePath(cfg, step.id),
+      files: built.files,
+    });
+    const progress = await this.recordStepVisit(cfg, step.id);
+    return this.stepStatePayload(cfg, step, {
+      files: built.files,
+      sourceStep: built.sourceStep,
+      inheritMode: stepInheritMode(step),
+      hasOwnSave: true,
+      editable: true,
+      progress,
+    });
+  }
+
+  async applySolution(tutorialId, stepId, { generation } = {}) {
+    this.assertNoCommandInProgress();
+    validateSafePath(tutorialId);
+    validateSafePath(stepId);
+    await this.ensureSaveRootDirs();
+    const cfg = await this.packageService.loadTutorial(tutorialId);
+    const step = findStep(cfg, stepId);
+    this.assertStepWritable(tutorialId, step.id, { generation });
+    if (!step.has_solution) {
+      throw Object.assign(new Error('this step has no solution'), { statusCode: 404, code: 'no_solution' });
+    }
+    const dest = this.saveDir(cfg, step.id);
+    const files = cloneWorkspaceFiles(step.solution_files);
+    await writeHostFiles(dest, files);
+    const metadata = await this.readSaveMetadata(cfg);
+    const testPassed = { ...(metadata.test_passed || {}) };
+    const testHash = { ...(metadata.test_hash || {}) };
+    delete testPassed[step.id];
+    delete testHash[step.id];
+    await this.writeSaveMetadata(cfg, {
+      ...metadata,
+      test_passed: testPassed,
+      test_hash: testHash,
+    });
     await this.workspaceService.useSaveWorkspace({
       tutorialId,
       hostPath: dest,
@@ -141,14 +216,198 @@ export class SaveService {
       files,
     });
     const progress = await this.recordStepVisit(cfg, step.id);
-    return {
-      tutorial: tutorialId,
-      step: step.id,
-      hasOwnSave: true,
+    return this.stepStatePayload(cfg, step, {
       files,
-      ui: await readStepUi(this.stepUiPath(cfg, step.id), step),
+      hasOwnSave: true,
+      editable: true,
       progress,
+    });
+  }
+
+  async constructArchiveFiles(cfg, step) {
+    const mode = stepInheritMode(step);
+    const template = cloneWorkspaceFiles(step.files);
+    if (mode === 'template' || !stepChain(step)) {
+      return { files: template, sourceStep: step.id };
+    }
+    const previous = await this.findPreviousChainArchive(cfg, step);
+    if (!previous) {
+      return { files: template, sourceStep: step.id };
+    }
+    let files = previous.files;
+    if (mode === 'overlay_template') {
+      const byName = new Map(files.map(f => [f.name, f]));
+      for (const templateFile of template) {
+        if (!byName.has(templateFile.name)) byName.set(templateFile.name, templateFile);
+      }
+      files = Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return { files, sourceStep: previous.stepId };
+  }
+
+  async findPreviousChainArchive(cfg, step) {
+    const chain = stepChain(step);
+    if (!chain) return null;
+    const steps = cfg.steps || [];
+    const idx = steps.findIndex(item => item.id === step.id);
+    for (let i = idx - 1; i >= 0; i--) {
+      if (stepChain(steps[i]) !== chain) continue;
+      const dir = this.saveDir(cfg, steps[i].id);
+      if (await dirExists(dir)) {
+        return { stepId: steps[i].id, files: await readHostFiles(dir) };
+      }
+    }
+    return null;
+  }
+
+  async isStepEditable(cfg, step, metadata) {
+    if (!stepNeedsEdit(step)) return false;
+    if (metadata.editable?.[step.id]) return true;
+    const steps = cfg.steps || [];
+    const idx = steps.findIndex(item => item.id === step.id);
+    if (idx <= 0) return idx === 0;
+    return this.arePreviousStepsComplete(cfg, step, metadata);
+  }
+
+  async arePreviousStepsComplete(cfg, step, metadata) {
+    const steps = cfg.steps || [];
+    const idx = steps.findIndex(item => item.id === step.id);
+    if (idx <= 0) return true;
+    for (let i = 0; i < idx; i++) {
+      if (!(await this.isStepComplete(cfg, steps[i], metadata))) return false;
+    }
+    return true;
+  }
+
+  async isStepComplete(cfg, step, metadata) {
+    if (!stepNeedsEdit(step)) return Boolean(metadata.completed?.[step.id]);
+    if (stepHasTest(step)) {
+      if (metadata.test_passed?.[step.id] !== true) return false;
+      const dir = this.saveDir(cfg, step.id);
+      if (!(await dirExists(dir))) return false;
+      const files = await readHostFiles(dir);
+      return hashWorkspaceFiles(files) === metadata.test_hash?.[step.id];
+    }
+    return Boolean(metadata.entered_editable?.[step.id]);
+  }
+
+  async decorateProgress(cfg, metadata) {
+    const completed = { ...(metadata.completed || {}) };
+    const editable = { ...(metadata.editable || {}) };
+    for (const step of cfg.steps || []) {
+      if (await this.isStepComplete(cfg, step, metadata)) completed[step.id] = true;
+      else delete completed[step.id];
+      if (stepNeedsEdit(step) && await this.isStepEditable(cfg, step, metadata)) {
+        editable[step.id] = true;
+      }
+    }
+    return {
+      ...metadata,
+      completed,
+      editable,
     };
+  }
+
+  async stepStatePayload(cfg, step, {
+    files,
+    sourceStep = step.id,
+    inheritMode = stepInheritMode(step),
+    editable,
+    hasOwnSave,
+    generation = this.activeStep?.generation || null,
+    progress,
+    ui,
+  } = {}) {
+    const metadata = progress || await this.readSaveMetadata(cfg);
+    const decorated = await this.decorateProgress(cfg, metadata);
+    const resolvedEditable = editable !== undefined
+      ? Boolean(editable)
+      : Boolean(decorated.editable[step.id]);
+    return {
+      tutorial: cfg.source_key || cfg.id,
+      step: step.id,
+      sourceStep,
+      inheritMode,
+      needs_edit: stepNeedsEdit(step),
+      has_solution: Boolean(step.has_solution),
+      editable: resolvedEditable,
+      complete: Boolean(decorated.completed[step.id]),
+      hasOwnSave: Boolean(hasOwnSave),
+      generation,
+      files,
+      ui: ui || await readStepUi(this.stepUiPath(cfg, step.id), step),
+      progress: decorated,
+    };
+  }
+
+  activateStep({ tutorialKey, packageId, stepId, editable }) {
+    const generation = this.nextGeneration++;
+    this.activeStep = {
+      tutorialKey,
+      packageId,
+      stepId,
+      editable: Boolean(editable),
+      generation,
+    };
+    return generation;
+  }
+
+  assertNoCommandInProgress() {
+    if (this.activeCommand) {
+      throw Object.assign(new Error('a command is already running'), {
+        statusCode: 409,
+        code: 'command_busy',
+      });
+    }
+  }
+
+  assertActiveStep(tutorial, step, generation) {
+    if (!this.activeStep || this.activeStep.tutorialKey !== tutorial || this.activeStep.stepId !== step) {
+      throw Object.assign(new Error('this step is not the active workspace'), {
+        statusCode: 409,
+        code: 'step_inactive',
+      });
+    }
+    if (generation !== undefined && generation !== null && generation !== this.activeStep.generation) {
+      throw Object.assign(new Error('step workspace is stale; reload the step'), {
+        statusCode: 409,
+        code: 'step_stale',
+      });
+    }
+  }
+
+  assertStepWritable(tutorial, step, { generation } = {}) {
+    this.assertActiveStep(tutorial, step, generation);
+    if (!this.activeStep.editable) {
+      throw notEditableError('this step cannot be edited yet');
+    }
+  }
+
+  assertStepCommand(tutorial, step, { generation, requireEditable = false } = {}) {
+    this.assertActiveStep(tutorial, step, generation);
+    if (requireEditable && !this.activeStep.editable) {
+      throw notEditableError('complete earlier steps before testing this one');
+    }
+  }
+
+  assertShellInput(tutorial, step, { generation } = {}) {
+    if (this.activeCommand) {
+      this.assertActiveStep(tutorial, step, generation);
+      return;
+    }
+    this.assertStepWritable(tutorial, step, { generation });
+  }
+
+  beginCommand({ tutorial, step, generation, token }) {
+    this.assertNoCommandInProgress();
+    this.assertActiveStep(tutorial, step, generation);
+    this.activeCommand = { tutorial, step, generation, token };
+  }
+
+  finishCommand(token) {
+    if (!this.activeCommand) return;
+    if (token && this.activeCommand.token !== token) return;
+    this.activeCommand = null;
   }
 
   async ensureSaveRootDirs() {
@@ -159,14 +418,24 @@ export class SaveService {
     return path.join(this.stepDir(cfg, stepId), 'files');
   }
 
+  previewDir(cfg, stepId) {
+    return path.join(this.packageSaveRoot(cfg), 'preview', validateSafePath(stepId), 'files');
+  }
+
   containerSavePath(cfg, stepId) {
+    return this.containerRelPath(cfg, ['steps', validateSafePath(stepId), 'files']);
+  }
+
+  containerPreviewPath(cfg, stepId) {
+    return this.containerRelPath(cfg, ['preview', validateSafePath(stepId), 'files']);
+  }
+
+  containerRelPath(cfg, parts) {
     const rel = [
       validateSafePath(cfg.id),
       validateStorageSegment(cfg.version || '0.0.0', 'package version'),
       digestPathSegment(cfg.package_digest),
-      'steps',
-      validateSafePath(stepId),
-      'files',
+      ...parts,
     ].join('/');
     return `${SAVES_BIND_TARGET}/${rel}`;
   }
@@ -190,17 +459,17 @@ export class SaveService {
     const metadata = await this.readSaveMetadata(cfg);
     const visited = new Set(Array.isArray(metadata.visited) ? metadata.visited : []);
     visited.add(validateSafePath(stepId));
-    return this.writeSaveMetadata(cfg, {
+    const written = await this.writeSaveMetadata(cfg, {
       ...metadata,
       current_step: stepId,
       visited: Array.from(visited),
     });
+    return this.decorateProgress(cfg, written);
   }
 
-  // 读取进度 metadata,不写回 (不记录 visit, 不覆盖 current_step)。
-  // 用于 tutorial detail 让前端 resume, 避免探测 step 0 时把 current_step 覆盖成 0。
   async getProgress(cfg) {
-    return this.readSaveMetadata(cfg);
+    const metadata = await this.readSaveMetadata(cfg);
+    return this.decorateProgress(cfg, metadata);
   }
 
   async recordTestResult(tutorialId, stepId, passed) {
@@ -208,29 +477,27 @@ export class SaveService {
     validateSafePath(stepId);
     const cfg = await this.packageService.loadTutorial(tutorialId);
     const step = findStep(cfg, stepId);
+    this.assertStepWritable(tutorialId, step.id);
+    const dest = this.saveDir(cfg, step.id);
+    const files = await readHostFiles(dest);
     const metadata = await this.recordStepVisit(cfg, step.id);
-    return this.writeSaveMetadata(cfg, {
+    const testPassed = { ...(metadata.test_passed || {}) };
+    const testHash = { ...(metadata.test_hash || {}) };
+    testPassed[step.id] = Boolean(passed);
+    testHash[step.id] = hashWorkspaceFiles(files);
+    const written = await this.writeSaveMetadata(cfg, {
       ...metadata,
-      test_passed: {
-        ...(metadata.test_passed || {}),
-        [step.id]: Boolean(passed),
-      },
+      test_passed: testPassed,
+      test_hash: testHash,
     });
+    return this.decorateProgress(cfg, written);
   }
 
   async readSaveMetadata(cfg) {
     const metadataPath = this.saveMetadataPath(cfg);
     try {
       const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
-      return {
-        ...defaultSaveMetadata(cfg),
-        ...metadata,
-        package: defaultSaveMetadata(cfg).package,
-        visited: Array.isArray(metadata.visited) ? metadata.visited : [],
-        test_passed: metadata.test_passed && typeof metadata.test_passed === 'object'
-          ? metadata.test_passed
-          : {},
-      };
+      return normalizeSaveMetadata(cfg, metadata);
     } catch (e) {
       if (e.code === 'ENOENT') return defaultSaveMetadata(cfg);
       throw e;
@@ -241,13 +508,8 @@ export class SaveService {
     const root = this.packageSaveRoot(cfg);
     await fs.mkdir(root, { recursive: true });
     const next = {
-      ...defaultSaveMetadata(cfg),
-      ...metadata,
+      ...normalizeSaveMetadata(cfg, metadata),
       package: defaultSaveMetadata(cfg).package,
-      visited: Array.isArray(metadata.visited) ? metadata.visited : [],
-      test_passed: metadata.test_passed && typeof metadata.test_passed === 'object'
-        ? metadata.test_passed
-        : {},
       updated_at: new Date().toISOString(),
     };
     await fs.writeFile(this.saveMetadataPath(cfg), JSON.stringify(next, null, 2) + '\n', 'utf8');
@@ -368,19 +630,31 @@ export class SaveService {
       await writeStepUi(this.stepUiPath(cfg, stepId), normalizeStepUi(parsedUi, step));
     }
 
-    const progress = await this.writeSaveMetadata(cfg, {
+    const progress = await this.writeSaveMetadata(cfg, normalizeSaveMetadata(cfg, {
       ...defaultSaveMetadata(cfg),
       current_step: metadata.current_step || null,
       visited: Array.isArray(metadata.visited) ? metadata.visited : [],
       test_passed: metadata.test_passed && typeof metadata.test_passed === 'object'
         ? metadata.test_passed
         : {},
-    });
+      test_hash: metadata.test_hash && typeof metadata.test_hash === 'object'
+        ? metadata.test_hash
+        : {},
+      completed: metadata.completed && typeof metadata.completed === 'object'
+        ? metadata.completed
+        : {},
+      editable: metadata.editable && typeof metadata.editable === 'object'
+        ? metadata.editable
+        : {},
+      entered_editable: metadata.entered_editable && typeof metadata.entered_editable === 'object'
+        ? metadata.entered_editable
+        : {},
+    }));
 
     return {
       source_key: cfg.source_key || match.source_key || match.id,
       package: progress.package,
-      progress,
+      progress: await this.decorateProgress(cfg, progress),
       steps: Array.from(stepIds).sort(),
     };
   }
@@ -402,12 +676,53 @@ function validateStorageSegment(value, fieldName) {
   return segment;
 }
 
-function stepChain(step) {
-  return step.chain || step.id;
+function notEditableError(message) {
+  return Object.assign(new Error(message), { statusCode: 403, code: 'not_editable' });
 }
 
-function findChainFirstStep(cfg, chain) {
-  return (cfg.steps || []).find(s => stepChain(s) === chain);
+function cloneWorkspaceFiles(files) {
+  return (files || []).map(file => (
+    file.type === 'dir'
+      ? { name: file.name, type: 'dir' }
+      : {
+        name: file.name,
+        type: 'file',
+        content: file.content || '',
+        language: file.language,
+      }
+  ));
+}
+
+function ignoreHashPath(name) {
+  const base = String(name || '').split('/').pop();
+  if (!base) return true;
+  if (base === 'a.out' || base === '.keep' || base === '.gitkeep' || base === '.DS_Store') return true;
+  if (base === '__pycache__' || String(name).includes('__pycache__/')) return true;
+  return /\.(o|obj|exe|pyc)$/i.test(base);
+}
+
+export function hashWorkspaceFiles(files) {
+  const hash = crypto.createHash('sha256');
+  const entries = (files || [])
+    .filter(file => file?.name && !ignoreHashPath(file.name))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  for (const file of entries) {
+    if (file.type === 'dir') {
+      hash.update('dir\0');
+      hash.update(file.name);
+      hash.update('\0');
+    } else {
+      const content = file.content || '';
+      hash.update('file\0');
+      hash.update(file.name);
+      hash.update('\0');
+      hash.update(String(Buffer.byteLength(content)));
+      hash.update('\0');
+      hash.update(content);
+      hash.update('\0');
+    }
+  }
+  return `sha256:${hash.digest('hex')}`;
 }
 
 async function dirExists(dir) {
@@ -418,19 +733,17 @@ async function dirExists(dir) {
   }
 }
 
+async function fileExists(filePath) {
+  try {
+    return (await fs.stat(filePath)).isFile();
+  } catch {
+    return false;
+  }
+}
+
 async function clearHostDir(dir) {
   await fs.rm(dir, { recursive: true, force: true });
   await fs.mkdir(dir, { recursive: true });
-}
-
-async function writeStepTemplateToDir(step, destDir) {
-  await clearHostDir(destDir);
-  for (const f of step.files || []) {
-    const rel = validateWorkspaceRelPath(f.name || 'untitled');
-    const dest = path.join(destDir, ...rel.split('/'));
-    await fs.mkdir(path.dirname(dest), { recursive: true });
-    await fs.writeFile(dest, f.content || '', 'utf8');
-  }
 }
 
 async function readHostFiles(dir) {
@@ -577,6 +890,10 @@ async function writeStepUi(uiPath, ui) {
   await fs.writeFile(uiPath, JSON.stringify(ui, null, 2) + '\n', 'utf8');
 }
 
+function objectMap(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {};
+}
+
 function defaultSaveMetadata(cfg) {
   return {
     package: {
@@ -587,7 +904,26 @@ function defaultSaveMetadata(cfg) {
     current_step: null,
     visited: [],
     test_passed: {},
+    test_hash: {},
+    completed: {},
+    editable: {},
+    entered_editable: {},
     updated_at: null,
+  };
+}
+
+function normalizeSaveMetadata(cfg, metadata = {}) {
+  const defaults = defaultSaveMetadata(cfg);
+  return {
+    ...defaults,
+    ...metadata,
+    package: defaults.package,
+    visited: Array.isArray(metadata.visited) ? metadata.visited : [],
+    test_passed: objectMap(metadata.test_passed),
+    test_hash: objectMap(metadata.test_hash),
+    completed: objectMap(metadata.completed),
+    editable: objectMap(metadata.editable),
+    entered_editable: objectMap(metadata.entered_editable),
   };
 }
 
@@ -617,4 +953,3 @@ function parseSaveArchivePath(relPath) {
     fileName: validateWorkspaceRelPath(match[2]),
   };
 }
-

@@ -9,6 +9,7 @@ import 'dotenv/config';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import http from 'http';
+import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
@@ -457,22 +458,32 @@ app.post('/api/steps/load', async (req, res) => {
 // 保存当前 workspace 为 step 的唯一逻辑 save
 app.post('/api/steps/save', async (req, res) => {
   try {
-    const { tutorial, step, files, ui } = req.body;
+    const { tutorial, step, files, ui, generation } = req.body;
     if (!tutorial || !step) return res.status(400).json({ error: 'tutorial and step required' });
-    res.json(await saveService.saveStepState(tutorial, step, files, { ui }));
+    res.json(await saveService.saveStepState(tutorial, step, files, { ui, generation }));
   } catch (e) {
-    res.status(e.statusCode || 500).json({ error: e.message });
+    res.status(e.statusCode || 500).json({ error: e.message, code: e.code });
   }
 });
 
-// Reset current step: template(step) → save(step) → workspace
+// Redo: re-run this step's archive constructor.
 app.post('/api/steps/reset', async (req, res) => {
   try {
-    const { tutorial, step } = req.body;
+    const { tutorial, step, generation } = req.body;
     if (!tutorial || !step) return res.status(400).json({ error: 'tutorial and step required' });
-    res.json(await saveService.resetStepState(tutorial, step));
+    res.json(await saveService.resetStepState(tutorial, step, { generation }));
   } catch (e) {
-    res.status(e.statusCode || 500).json({ error: e.message });
+    res.status(e.statusCode || 500).json({ error: e.message, code: e.code });
+  }
+});
+
+app.post('/api/steps/solution', async (req, res) => {
+  try {
+    const { tutorial, step, generation } = req.body;
+    if (!tutorial || !step) return res.status(400).json({ error: 'tutorial and step required' });
+    res.json(await saveService.applySolution(tutorial, step, { generation }));
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message, code: e.code });
   }
 });
 
@@ -480,13 +491,13 @@ app.post('/api/steps/reset', async (req, res) => {
 // body: { tutorial, step, command } → { exitCode, passed, output }
 app.post('/api/commands/run', async (req, res) => {
   try {
-    const { tutorial, step, command } = req.body;
+    const { tutorial, step, command, generation } = req.body;
     if (!tutorial || !step || !command) {
       return res.status(400).json({ error: 'tutorial, step and command required' });
     }
-    res.json(await commandService.runCapturedCommand({ tutorial, step, command }));
+    res.json(await commandService.runCapturedCommand({ tutorial, step, command, generation }));
   } catch (e) {
-    res.status(e.statusCode || 500).json({ error: e.message });
+    res.status(e.statusCode || 500).json({ error: e.message, code: e.code });
   }
 });
 
@@ -512,10 +523,17 @@ app.post('/api/fs/read', async (req, res) => {
 
 app.post('/api/fs/write', async (req, res) => {
   try {
-    const { path: filePath, content } = req.body;
+    const { path: filePath, content, tutorial, step, generation } = req.body;
     if (!filePath) return res.status(400).json({ error: 'path required' });
+    const active = saveService.activeStep;
+    if (!active) {
+      throw Object.assign(new Error('this step cannot be edited yet'), { statusCode: 403, code: 'not_editable' });
+    }
+    saveService.assertStepWritable(tutorial || active.tutorialKey, step || active.stepId, { generation });
     res.json(await workspaceService.writeFile(filePath, content));
-  } catch (e) { res.status(e.statusCode || 500).json({ error: e.message }); }
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message, code: e.code });
+  }
 });
 
 app.get('/api/workspace/export', async (req, res) => {
@@ -532,41 +550,34 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 
 wss.on('connection', (ws) => {
-  // 常驻交互式 shell —— 连接建立即启动,贯穿整个会话。
-  // 平时它就是一个真 bash (有 PS1 提示符),用户可随时敲 ls/gcc/gdb 等任意命令;
-  // 点 ▶ 运行 = 先保存 workspace,再把 manifest command script 注入 shell stdin,
-  // shell 自己回显命令、执行、回到提示符。Ctrl+C = 往 stdin 发 \x03。
   let terminal = null;
   let fsWatcher = null;
+  let activeCommandHandle = null;
+  let commandToken = null;
 
-  ws.send(JSON.stringify({ type: 'status', message: 'connected' }));
+  const send = (payload) => {
+    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(payload));
+  };
+
+  send({ type: 'status', message: 'connected' });
 
   (async () => {
     try {
       terminal = await getRuntimeSession().attachTerminal({
         onOutput(data) {
-          if (ws.readyState === ws.OPEN) {
-            ws.send(JSON.stringify({ type: 'output', data }));
-          }
+          send({ type: 'output', data });
         },
         onExit() {
-          if (ws.readyState === ws.OPEN) {
-            ws.send(JSON.stringify({ type: 'status', message: 'shell exited' }));
-          }
+          send({ type: 'status', message: 'shell exited' });
           terminal = null;
         },
       });
 
-      // Workspace-owned filesystem watcher. Current Docker strategy uses the
-      // find-polling fallback (~1s) and pushes fs_change over this /ws.
-      // Lifecycle is bound to this connection.
       fsWatcher = workspaceService.watch(() => {
-        if (ws.readyState === ws.OPEN) {
-          ws.send(JSON.stringify({ type: 'fs_change' }));
-        }
+        send({ type: 'fs_change' });
       });
 
-      ws.send(JSON.stringify({ type: 'ready' }));
+      send({ type: 'ready' });
     } catch (e) {
       ws.send(JSON.stringify({ type: 'error', message: e.message }));
     }
@@ -580,59 +591,91 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    // ① 交互式 command: 读取 manifest command script,写入容器 /tmp,再注入常驻 shell 执行。
     if (msg.type === 'command') {
       try {
-        if (!terminal) {
-          ws.send(JSON.stringify({ type: 'error', message: 'shell 尚未就绪,请稍候' }));
+        if (activeCommandHandle) {
+          send({ type: 'error', message: 'a command is already running', code: 'command_busy' });
           return;
         }
-        const { tutorial, step, command } = msg;
+        const { tutorial, step, command, generation } = msg;
         if (!tutorial || !step || !command) {
-          ws.send(JSON.stringify({ type: 'error', message: 'tutorial, step and command required' }));
+          send({ type: 'error', message: 'tutorial, step and command required' });
           return;
         }
-        await commandService.runInteractiveCommand({ tutorial, step, command, terminal });
-        ws.send(JSON.stringify({ type: 'status', message: `running command: ${command}` }));
+        commandToken = crypto.randomUUID();
+        const started = await commandService.runInteractiveCommand({
+          tutorial,
+          step,
+          command,
+          generation,
+          completionToken: commandToken,
+          hooks: {
+            onOutput(data) {
+              send({ type: 'output', data });
+            },
+            onDone(exitCode) {
+              activeCommandHandle = null;
+              commandToken = null;
+              send({ type: 'command_done', exitCode });
+            },
+          },
+        });
+        activeCommandHandle = started.handle;
+        send({ type: 'status', message: `running command: ${command}` });
       } catch (e) {
-        ws.send(JSON.stringify({
+        activeCommandHandle = null;
+        commandToken = null;
+        send({
           type: 'error',
           message: e.message,
           code: e.code || undefined,
-        }));
+        });
       }
       return;
     }
 
-    // ② 终端输入: 直接走 shell stdin (支持 gdb 交互、任意 REPL)
     if (msg.type === 'input') {
-      if (terminal && msg.data) {
-        terminal.write(msg.data);
+      try {
+        saveService.assertShellInput(msg.tutorial, msg.step, { generation: msg.generation });
+        const target = activeCommandHandle || terminal;
+        if (target && msg.data) target.write(msg.data);
+      } catch (e) {
+        send({ type: 'error', message: e.message, code: e.code });
       }
       return;
     }
 
-    // ③ 终端尺寸变化
     if (msg.type === 'resize') {
-      if (terminal && msg.cols && msg.rows) {
+      if (msg.cols && msg.rows) {
         try {
-          await getRuntimeSession().resize(terminal, msg.cols, msg.rows);
+          if (activeCommandHandle) {
+            await activeCommandHandle.resize(msg.cols, msg.rows);
+          } else if (terminal) {
+            await getRuntimeSession().resize(terminal, msg.cols, msg.rows);
+          }
         } catch {}
       }
       return;
     }
 
-    // ④ Ctrl+C / 中断 —— 往 shell stdin 发 \x03,不杀常驻 shell
     if (msg.type === 'interrupt') {
-      if (terminal) {
+      if (activeCommandHandle) {
+        activeCommandHandle.interrupt();
+      } else if (terminal) {
         await getRuntimeSession().interrupt(terminal);
-        ws.send(JSON.stringify({ type: 'status', message: 'interrupted' }));
       }
+      send({ type: 'status', message: 'interrupted' });
       return;
     }
   });
 
   ws.on('close', () => {
+    if (activeCommandHandle) {
+      try { activeCommandHandle.close(); } catch {}
+      saveService.finishCommand(commandToken);
+      activeCommandHandle = null;
+      commandToken = null;
+    }
     if (terminal) {
       terminal.close();
     }

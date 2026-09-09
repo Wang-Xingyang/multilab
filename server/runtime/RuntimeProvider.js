@@ -11,9 +11,14 @@ import { describeCapabilities } from './RuntimeContract.js';
  *
  * Required on every session:
  *   ensure, ensureWorkspace, writeFiles, readFiles, uploadScript,
- *   runCaptured(script, { timeoutMs }), attachTerminal, interrupt, resize,
- *   tempScriptPath, getPortMap, exec (fallback IO), watchFilesystem,
- *   pointWorkspace (retarget workspace at a save dir), dispose
+ *   runCaptured(script, { timeoutMs }), attachTerminal, attachCommand,
+ *   interrupt, resize, tempScriptPath, getPortMap, exec (fallback IO),
+ *   watchFilesystem, pointWorkspace (retarget workspace at a save dir),
+ *   dispose
+ *
+ * Interactive declared commands run through attachCommand: a dedicated
+ * exec PTY whose completion is the stream ending plus the inspected exit
+ * code. Do not reintroduce stdout completion markers.
  *
  * CommandService / SaveService must not import dockerode.
  */
@@ -86,6 +91,10 @@ export class RuntimeSession {
 
   async attachTerminal() {
     throw new Error('RuntimeSession.attachTerminal() must be implemented');
+  }
+
+  async attachCommand() {
+    throw new Error('RuntimeSession.attachCommand() must be implemented');
   }
 
   async interrupt() {

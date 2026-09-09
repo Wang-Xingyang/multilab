@@ -1,6 +1,7 @@
 import { validateSafePath } from './PackageService.js';
 import { buildPreviewMeta } from './PreviewPortMap.js';
 import { capturedTimeoutMs } from '../runtime/RuntimeContract.js';
+import crypto from 'crypto';
 
 export class CommandService {
   constructor({
@@ -17,7 +18,7 @@ export class CommandService {
     this.saveService = saveService;
   }
 
-  async runCapturedCommand({ tutorial, step, command }) {
+  async runCapturedCommand({ tutorial, step, command, generation = null }) {
     validateSafePath(tutorial);
     validateSafePath(step);
     validateSafePath(command);
@@ -31,33 +32,52 @@ export class CommandService {
         { statusCode: 400 }
       );
     }
+    if (this.saveService) {
+      await this.saveService.assertStepCommand(tutorial, step, {
+        generation,
+        requireEditable: commandSpec.command.type === 'test',
+      });
+    }
 
-    const remoteScript = session.tempScriptPath(step, command);
-    await session.uploadScript(commandSpec.script, remoteScript);
-    const result = await session.runCaptured(remoteScript, {
-      timeoutMs: capturedTimeoutMs(commandSpec.command),
-    });
-    const passed = result.exitCode === 0;
-    const progress = commandSpec.command.type === 'test' && this.saveService
-      ? await this.saveService.recordTestResult(tutorial, step, passed)
-      : null;
-    const output = (result.stdout + (result.stderr ? '\n' + result.stderr : '')).trim();
-    const portMap = session.getPortMap();
-    const previewMeta = commandSpec.command.type === 'preview'
-      ? buildPreviewMeta(output, portMap)
-      : {};
-    return {
-      command,
-      exitCode: result.exitCode,
-      passed,
-      output,
-      kernel: auth?.kernel ? { id: auth.kernel.id, provider: auth.kernel.provider } : undefined,
-      ...(progress ? { progress } : {}),
-      ...previewMeta,
-    };
+    const commandToken = crypto.randomUUID();
+    this.saveService?.beginCommand?.({ tutorial, step, generation, token: commandToken });
+    try {
+      const remoteScript = session.tempScriptPath(step, command);
+      await session.uploadScript(commandSpec.script, remoteScript);
+      const result = await session.runCaptured(remoteScript, {
+        timeoutMs: capturedTimeoutMs(commandSpec.command),
+      });
+      const passed = result.exitCode === 0;
+      const progress = commandSpec.command.type === 'test' && this.saveService
+        ? await this.saveService.recordTestResult(tutorial, step, passed)
+        : null;
+      const output = (result.stdout + (result.stderr ? '\n' + result.stderr : '')).trim();
+      const portMap = session.getPortMap();
+      const previewMeta = commandSpec.command.type === 'preview'
+        ? buildPreviewMeta(output, portMap)
+        : {};
+      return {
+        command,
+        exitCode: result.exitCode,
+        passed,
+        output,
+        kernel: auth?.kernel ? { id: auth.kernel.id, provider: auth.kernel.provider } : undefined,
+        ...(progress ? { progress } : {}),
+        ...previewMeta,
+      };
+    } finally {
+      this.saveService?.finishCommand?.(commandToken);
+    }
   }
 
-  async runInteractiveCommand({ tutorial, step, command, terminal }) {
+  async runInteractiveCommand({
+    tutorial,
+    step,
+    command,
+    generation = null,
+    completionToken = null,
+    hooks = {},
+  }) {
     validateSafePath(tutorial);
     validateSafePath(step);
     validateSafePath(command);
@@ -77,14 +97,41 @@ export class CommandService {
         { statusCode: 400 }
       );
     }
+    if (this.saveService) {
+      await this.saveService.assertStepCommand(tutorial, step, {
+        generation,
+        requireEditable: commandSpec.command.type === 'test',
+      });
+    }
+    if (completionToken) {
+      this.saveService?.beginCommand?.({
+        tutorial,
+        step,
+        generation,
+        token: completionToken,
+      });
+    }
 
-    const remoteScript = ensured.session.tempScriptPath(step, command);
-    await ensured.session.uploadScript(commandSpec.script, remoteScript);
-    terminal.runScript(remoteScript);
-    return {
-      command,
-      kernel: auth?.kernel ? { id: auth.kernel.id, provider: auth.kernel.provider } : undefined,
-    };
+    try {
+      const remoteScript = ensured.session.tempScriptPath(step, command);
+      await ensured.session.uploadScript(commandSpec.script, remoteScript);
+      hooks.onOutput?.(`\x1b[90m$ bash ${commandSpec.command.script || remoteScript}\x1b[0m\r\n`);
+      const handle = await ensured.session.attachCommand(remoteScript, {
+        onOutput: hooks.onOutput,
+        onDone: (exitCode) => {
+          this.saveService?.finishCommand?.(completionToken);
+          hooks.onDone?.(exitCode);
+        },
+      });
+      return {
+        command,
+        kernel: auth?.kernel ? { id: auth.kernel.id, provider: auth.kernel.provider } : undefined,
+        handle,
+      };
+    } catch (error) {
+      this.saveService?.finishCommand?.(completionToken);
+      throw error;
+    }
   }
 
   async authorizeCommand({ tutorial }) {
@@ -115,4 +162,3 @@ export class CommandService {
     return ensured.session;
   }
 }
-

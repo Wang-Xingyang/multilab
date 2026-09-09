@@ -194,22 +194,44 @@ export class DockerRuntimeSession extends RuntimeSession {
   }
 
   async ensureWorkspace() {
-    if (this.workspaceReady) return;
-    const hostPath = this.workspaceStrategy?.hostPath;
-    if (hostPath) {
-      await ensureHostWorkspaceDir(hostPath);
+    const first = !this.workspaceReady;
+    if (first) {
+      const hostPath = this.workspaceStrategy?.hostPath;
+      if (hostPath) {
+        await ensureHostWorkspaceDir(hostPath);
+      }
+      await this.#alignStudentUid();
     }
-    await this.#alignStudentUid();
-    await this.exec(['mkdir', '-p', this.workspaceDir, SAVES_BIND_TARGET], { user: 'root', cwd: '/' });
+    // Always repair: a dangling workspace symlink "exists" for mkdir -p, but
+    // docker exec chdir cannot follow it (OCI "no such file or directory").
+    await this.#repairWorkspaceCwd();
+    if (!first) return;
     await this.exec(['bash', '-lc', `chmod 711 /mlab ${SAVES_BIND_TARGET} 2>/dev/null || true`], {
       user: 'root',
       cwd: '/',
     });
-    if (!hostPath) {
+    if (!this.workspaceStrategy?.hostPath) {
       await this.exec(['chown', '-R', 'student:student', this.workspaceDir], { user: 'root', cwd: '/' });
     }
     await this.#installLearnerShellHook();
     this.workspaceReady = true;
+  }
+
+  async #repairWorkspaceCwd() {
+    const quotedWs = shQuote(this.workspaceDir);
+    const result = await this.exec(['bash', '-lc', `
+set -e
+mkdir -p ${shQuote(SAVES_BIND_TARGET)}
+if [ -L ${quotedWs} ] && [ ! -e ${quotedWs} ]; then
+  rm -f ${quotedWs}
+fi
+if [ ! -e ${quotedWs} ]; then
+  mkdir -p ${quotedWs}
+fi
+`], { user: 'root', cwd: '/' });
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr || 'failed to ensure /home/student/workspace');
+    }
   }
 
   async pointWorkspace(containerPath) {
@@ -486,8 +508,60 @@ done
       close() {
         shellStream.destroy();
       },
-      runScript(remoteScript) {
-        shellStream.write(`bash ${remoteScript}\n`);
+    };
+  }
+
+  async attachCommand(remoteScript, {
+    onOutput,
+    onDone,
+  } = {}) {
+    await this.ensureWorkspace();
+    const container = await this.ensure();
+    const commandExec = await container.exec({
+      Cmd: ['bash', remoteScript],
+      AttachStdin: true,
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: true,
+      User: 'student',
+      WorkingDir: this.workspaceDir,
+      Env: learnerShellEnv(),
+    });
+    const commandStream = await commandExec.start({ hijack: true, stdin: true });
+    const stdoutPipe = new PassThrough();
+    const stderrPipe = new PassThrough();
+
+    container.modem.demuxStream(commandStream, stdoutPipe, stderrPipe);
+    stdoutPipe.on('data', chunk => onOutput?.(chunk.toString('utf8')));
+    stderrPipe.on('data', chunk => onOutput?.(chunk.toString('utf8')));
+
+    let doneFired = false;
+    const fireDone = async () => {
+      if (doneFired) return;
+      doneFired = true;
+      let exitCode = null;
+      try {
+        const info = await commandExec.inspect();
+        exitCode = typeof info.ExitCode === 'number' ? info.ExitCode : null;
+      } catch {}
+      onDone?.(exitCode);
+    };
+    commandStream.on('end', fireDone);
+    commandStream.on('close', fireDone);
+    commandStream.on('error', fireDone);
+
+    return {
+      write(data) {
+        commandStream.write(data);
+      },
+      interrupt() {
+        commandStream.write('\x03');
+      },
+      async resize(cols, rows) {
+        await commandExec.resize({ h: rows, w: cols });
+      },
+      close() {
+        commandStream.destroy();
       },
     };
   }
