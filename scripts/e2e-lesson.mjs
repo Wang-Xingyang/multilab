@@ -90,26 +90,27 @@ await test('tutorial detail returns progress for resume', async () => {
   assert.equal(body.trust, 'untrusted');
 });
 
-await test('captured test command PASS on step 01', async () => {
-  await apiJson('/api/steps/load', { tutorial: 'hello-c', step: '01-first-program' });
-  const { body } = await apiJson('/api/commands/run', { tutorial: 'hello-c', step: '01-first-program', command: 'test' });
+await test('captured test command PASS on first exercise', async () => {
+  await apiJson('/api/steps/load', { tutorial: 'hello-c', step: '01-watch-hello' });
+  await apiJson('/api/steps/load', { tutorial: 'hello-c', step: '02-first-program' });
+  const { body } = await apiJson('/api/commands/run', { tutorial: 'hello-c', step: '02-first-program', command: 'test' });
   assert.equal(body.passed, true, `expected passed=true, got exitCode=${body.exitCode} output=${(body.output || '').slice(0, 120)}`);
 });
 
 await test('WS interactive run outputs program text', async () => {
-  const out = await wsCollect('hello-c', '01-first-program', 'run');
+  const out = await wsCollect('hello-c', '02-first-program', 'run');
   assert.match(out, /Hello, CS Student/);
 });
 
 // --- B. save + resume ---
 await test('step save persists and resume survives reload', async () => {
-  await apiJson('/api/steps/load', { tutorial: 'hello-c', step: '02-args' });
+  await apiJson('/api/steps/load', { tutorial: 'hello-c', step: '05-args' });
   const { body } = await api('/api/tutorials/hello-c');
-  assert.equal(body.progress.current_step, '02-args', 'current_step must reflect last loaded step, not step 0');
+  assert.equal(body.progress.current_step, '05-args', 'current_step must reflect last loaded step, not step 0');
 });
 
 await test('step reset restores template files', async () => {
-  const { body } = await apiJson('/api/steps/reset', { tutorial: 'hello-c', step: '01-first-program' });
+  const { body } = await apiJson('/api/steps/reset', { tutorial: 'hello-c', step: '02-first-program' });
   assert.ok(body.files.some((f) => f.name === 'hello.c'));
 });
 
@@ -203,12 +204,12 @@ await test('save import with missing package returns package_missing', async () 
       version: '1.0.0',
       digest: `sha256:${'a'.repeat(64)}`,
     },
-    current_step: '01-first-program',
-    visited: ['01-first-program'],
+    current_step: '02-first-program',
+    visited: ['02-first-program'],
     test_passed: {},
   }, null, 2) + '\n';
   zipFile.addBuffer(Buffer.from(saveJson), 'save.json');
-  zipFile.addBuffer(Buffer.from('int main(){return 0;}\n'), 'steps/01-first-program/files/hello.c');
+  zipFile.addBuffer(Buffer.from('int main(){return 0;}\n'), 'steps/02-first-program/files/hello.c');
   await new Promise((resolve, reject) => {
     const output = createWriteStream(archivePath);
     output.on('close', resolve);
@@ -240,7 +241,7 @@ await test('fs tree lists workspace files', async () => {
 await test('container mkdir shows up in file-tree listing', async () => {
   const container = process.env.CONTAINER_NAME || 'multilab-session';
   const probe = `__mlab_tree_${Date.now()}`;
-  await apiJson('/api/steps/load', { tutorial: 'hello-c', step: '01-first-program' });
+  await apiJson('/api/steps/load', { tutorial: 'hello-c', step: '02-first-program' });
   const created = spawnSync('docker', ['exec', '-u', 'student', container, 'mkdir', '-p', `/home/student/workspace/${probe}`], { encoding: 'utf8' });
   assert.equal(created.status, 0, created.stderr || created.stdout);
   let found = false;
@@ -256,7 +257,7 @@ await test('container mkdir shows up in file-tree listing', async () => {
 
 await test('learner-visible cwd does not print the save digest path', async () => {
   const container = process.env.CONTAINER_NAME || 'multilab-session';
-  await apiJson('/api/steps/load', { tutorial: 'hello-c', step: '01-first-program' });
+  await apiJson('/api/steps/load', { tutorial: 'hello-c', step: '02-first-program' });
   const probe = spawnSync('docker', [
     'exec', '-u', 'student', '-w', '/home/student/workspace', container,
     'bash', '--login', '-ic', 'printf %s "$PWD"',
