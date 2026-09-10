@@ -20,6 +20,12 @@ import { renderTutorialMarkdown } from './content-renderer.js';
 import { renderCatalog, setCatalogLabel } from './library.js';
 
 let lastRenderedStepId = null;
+let enterChain = Promise.resolve();
+let latestEnter = null;
+
+function isStaleStepError(err) {
+  return err?.code === 'step_inactive' || err?.code === 'step_stale';
+}
 export function renderTutorialStepText() {
   const step = currentStepObj();
   const content = document.getElementById('tutorial-content');
@@ -124,12 +130,28 @@ export async function loadTutorial(id) {
 
 export async function enterStep(targetIndex, opts = {}) {
   if (!state.currentTutorial || !state.currentTutorial.steps?.[targetIndex]) return;
+  const mine = { targetIndex, opts };
+  latestEnter = mine;
+  enterChain = enterChain.then(async () => {
+    if (latestEnter !== mine) return;
+    latestEnter = null;
+    await enterStepOnce(mine.targetIndex, mine.opts);
+  }).catch(() => {});
+  return enterChain;
+}
+
+async function enterStepOnce(targetIndex, opts = {}) {
+  if (!state.currentTutorial || !state.currentTutorial.steps?.[targetIndex]) return;
   const seq = ++state.stepLoadSeq;
   try {
     document.getElementById('prev-step').disabled = true;
     document.getElementById('next-step').disabled = true;
     if (!opts.skipSave && state.currentStepAccess?.editable) {
-      await saveCurrentStep({ silent: true, force: true });
+      try {
+        await saveCurrentStep({ silent: true, force: true });
+      } catch (e) {
+        if (!isStaleStepError(e)) throw e;
+      }
     }
     status(t('tutorial.loadingStep'));
     const step = state.currentTutorial.steps[targetIndex];
@@ -158,5 +180,7 @@ export async function enterStep(targetIndex, opts = {}) {
       log: true,
     });
     renderTutorialStepText();
+  } finally {
+    if (seq === state.stepLoadSeq) applyProgressToUi();
   }
 }

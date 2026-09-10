@@ -16,6 +16,8 @@ import { SAVES_BIND_TARGET } from '../workspace/WorkspaceStrategy.js';
 const UI_MAX_BYTES = 8192;
 
 export class SaveService {
+  #exclusive = Promise.resolve();
+
   constructor({ runtimeStateDir, workspaceService, packageService }) {
     this.runtimeStateDir = runtimeStateDir;
     this.workspaceService = workspaceService;
@@ -23,6 +25,12 @@ export class SaveService {
     this.activeStep = null;
     this.activeCommand = null;
     this.nextGeneration = 1;
+  }
+
+  runExclusive(fn) {
+    const run = this.#exclusive.then(fn, fn);
+    this.#exclusive = run.then(() => undefined, () => undefined);
+    return run;
   }
 
   async loadStepState(tutorialId, stepId) {
@@ -37,8 +45,10 @@ export class SaveService {
     let metadata = await this.readSaveMetadata(cfg);
 
     const needsEdit = stepNeedsEdit(step);
+    const previousComplete = await this.arePreviousStepsComplete(cfg, step, metadata);
+    const wasEditable = Boolean(metadata.editable?.[step.id]);
     let editable = needsEdit ? await this.isStepEditable(cfg, step, metadata) : false;
-    if (needsEdit && editable && !metadata.editable[step.id]) {
+    if (needsEdit && editable && !wasEditable) {
       metadata = await this.writeSaveMetadata(cfg, {
         ...metadata,
         editable: { ...metadata.editable, [step.id]: true },
@@ -57,6 +67,8 @@ export class SaveService {
       });
     }
 
+    const commandsAllowed = needsEdit ? Boolean(editable && previousComplete) : true;
+
     let files;
     let sourceStep = step.id;
     let workspaceHostPath;
@@ -65,8 +77,9 @@ export class SaveService {
 
     if (needsEdit && editable) {
       const ownSaveDir = this.saveDir(cfg, step.id);
-      hasOwnSave = await dirExists(ownSaveDir);
-      if (!hasOwnSave) {
+      const dirThere = await dirExists(ownSaveDir);
+      const justUnlocked = !wasEditable && previousComplete;
+      if (previousComplete && (!dirThere || justUnlocked)) {
         const built = await this.constructArchiveFiles(cfg, step);
         files = built.files;
         sourceStep = built.sourceStep;
@@ -74,11 +87,19 @@ export class SaveService {
         if (!(await fileExists(this.stepUiPath(cfg, step.id)))) {
           await writeStepUi(this.stepUiPath(cfg, step.id), defaultStepUi(step));
         }
+        metadata = await this.markArchiveBuilt(cfg, metadata, step.id);
         hasOwnSave = true;
-      } else {
+      } else if (dirThere) {
         files = await readHostFiles(ownSaveDir);
+        hasOwnSave = true;
+        if (!metadata.archive_built?.[step.id]) {
+          metadata = await this.markArchiveBuilt(cfg, metadata, step.id);
+        }
       }
-      workspaceHostPath = ownSaveDir;
+    }
+
+    if (hasOwnSave) {
+      workspaceHostPath = this.saveDir(cfg, step.id);
       workspaceContainerPath = this.containerSavePath(cfg, step.id);
     } else {
       files = cloneWorkspaceFiles(step.files);
@@ -99,6 +120,7 @@ export class SaveService {
       packageId: cfg.id,
       stepId: step.id,
       editable,
+      commandsAllowed,
     });
     const progress = await this.recordStepVisit(cfg, step.id);
     return this.stepStatePayload(cfg, step, {
@@ -106,6 +128,7 @@ export class SaveService {
       sourceStep,
       inheritMode: mode,
       editable,
+      commandsAllowed,
       hasOwnSave,
       generation,
       progress,
@@ -136,11 +159,13 @@ export class SaveService {
       ? normalizeStepUi(ui, step)
       : await readStepUi(this.stepUiPath(cfg, step.id), step);
     await writeStepUi(this.stepUiPath(cfg, step.id), nextUi);
+    await this.markArchiveBuilt(cfg, await this.readSaveMetadata(cfg), step.id);
     const progress = await this.recordStepVisit(cfg, step.id);
     return this.stepStatePayload(cfg, step, {
       files: await readHostFiles(dest),
       hasOwnSave: true,
       editable: true,
+      commandsAllowed: this.activeStep?.commandsAllowed,
       progress,
       ui: nextUi,
     });
@@ -167,6 +192,7 @@ export class SaveService {
       ...metadata,
       test_passed: testPassed,
       test_hash: testHash,
+      archive_built: { ...metadata.archive_built, [step.id]: true },
     });
     await this.workspaceService.useSaveWorkspace({
       tutorialId,
@@ -181,6 +207,7 @@ export class SaveService {
       inheritMode: stepInheritMode(step),
       hasOwnSave: true,
       editable: true,
+      commandsAllowed: this.activeStep?.commandsAllowed,
       progress,
     });
   }
@@ -208,6 +235,7 @@ export class SaveService {
       ...metadata,
       test_passed: testPassed,
       test_hash: testHash,
+      archive_built: { ...metadata.archive_built, [step.id]: true },
     });
     await this.workspaceService.useSaveWorkspace({
       tutorialId,
@@ -220,6 +248,7 @@ export class SaveService {
       files,
       hasOwnSave: true,
       editable: true,
+      commandsAllowed: this.activeStep?.commandsAllowed,
       progress,
     });
   }
@@ -313,6 +342,7 @@ export class SaveService {
     sourceStep = step.id,
     inheritMode = stepInheritMode(step),
     editable,
+    commandsAllowed,
     hasOwnSave,
     generation = this.activeStep?.generation || null,
     progress,
@@ -323,6 +353,10 @@ export class SaveService {
     const resolvedEditable = editable !== undefined
       ? Boolean(editable)
       : Boolean(decorated.editable[step.id]);
+    const previousComplete = await this.arePreviousStepsComplete(cfg, step, decorated);
+    const resolvedCommandsAllowed = commandsAllowed !== undefined
+      ? Boolean(commandsAllowed)
+      : (stepNeedsEdit(step) ? Boolean(resolvedEditable && previousComplete) : true);
     return {
       tutorial: cfg.source_key || cfg.id,
       step: step.id,
@@ -331,6 +365,7 @@ export class SaveService {
       needs_edit: stepNeedsEdit(step),
       has_solution: Boolean(step.has_solution),
       editable: resolvedEditable,
+      commands_allowed: resolvedCommandsAllowed,
       complete: Boolean(decorated.completed[step.id]),
       hasOwnSave: Boolean(hasOwnSave),
       generation,
@@ -340,13 +375,14 @@ export class SaveService {
     };
   }
 
-  activateStep({ tutorialKey, packageId, stepId, editable }) {
+  activateStep({ tutorialKey, packageId, stepId, editable, commandsAllowed }) {
     const generation = this.nextGeneration++;
     this.activeStep = {
       tutorialKey,
       packageId,
       stepId,
       editable: Boolean(editable),
+      commandsAllowed: commandsAllowed !== undefined ? Boolean(commandsAllowed) : Boolean(editable),
       generation,
     };
     return generation;
@@ -385,8 +421,9 @@ export class SaveService {
 
   assertStepCommand(tutorial, step, { generation, requireEditable = false } = {}) {
     this.assertActiveStep(tutorial, step, generation);
-    if (requireEditable && !this.activeStep.editable) {
-      throw notEditableError('complete earlier steps before testing this one');
+    if (!requireEditable) return;
+    if (!this.activeStep.editable || !this.activeStep.commandsAllowed) {
+      throw notEditableError('complete earlier steps before running this command');
     }
   }
 
@@ -395,7 +432,10 @@ export class SaveService {
       this.assertActiveStep(tutorial, step, generation);
       return;
     }
-    this.assertStepWritable(tutorial, step, { generation });
+    this.assertActiveStep(tutorial, step, generation);
+    if (!this.activeStep.editable || !this.activeStep.commandsAllowed) {
+      throw notEditableError('this step cannot be edited yet');
+    }
   }
 
   beginCommand({ tutorial, step, generation, token }) {
@@ -455,6 +495,14 @@ export class SaveService {
     return path.join(this.runtimeStateDir, 'saves', packageId, version, digest);
   }
 
+  async markArchiveBuilt(cfg, metadata, stepId) {
+    if (metadata.archive_built?.[stepId]) return metadata;
+    return this.writeSaveMetadata(cfg, {
+      ...metadata,
+      archive_built: { ...metadata.archive_built, [stepId]: true },
+    });
+  }
+
   async recordStepVisit(cfg, stepId) {
     const metadata = await this.readSaveMetadata(cfg);
     const visited = new Set(Array.isArray(metadata.visited) ? metadata.visited : []);
@@ -480,7 +528,8 @@ export class SaveService {
     this.assertStepWritable(tutorialId, step.id);
     const dest = this.saveDir(cfg, step.id);
     const files = await readHostFiles(dest);
-    const metadata = await this.recordStepVisit(cfg, step.id);
+    await this.recordStepVisit(cfg, step.id);
+    const metadata = await this.readSaveMetadata(cfg);
     const testPassed = { ...(metadata.test_passed || {}) };
     const testHash = { ...(metadata.test_hash || {}) };
     testPassed[step.id] = Boolean(passed);
@@ -648,6 +697,9 @@ export class SaveService {
         : {},
       entered_editable: metadata.entered_editable && typeof metadata.entered_editable === 'object'
         ? metadata.entered_editable
+        : {},
+      archive_built: metadata.archive_built && typeof metadata.archive_built === 'object'
+        ? metadata.archive_built
         : {},
     }));
 
@@ -908,6 +960,7 @@ function defaultSaveMetadata(cfg) {
     completed: {},
     editable: {},
     entered_editable: {},
+    archive_built: {},
     updated_at: null,
   };
 }
@@ -924,6 +977,7 @@ function normalizeSaveMetadata(cfg, metadata = {}) {
     completed: objectMap(metadata.completed),
     editable: objectMap(metadata.editable),
     entered_editable: objectMap(metadata.entered_editable),
+    archive_built: objectMap(metadata.archive_built),
   };
 }
 

@@ -87,7 +87,7 @@ Supported command types:
 
 ## Command Rules
 
-Use `terminal: "interactive"` for commands that should run in a dedicated command PTY, usually `run`. When a step is not editable, the persistent bash accepts no stdin; Run still works.
+Use `terminal: "interactive"` for commands that should run in a dedicated command PTY, usually `run`. When a step is not editable, the persistent bash accepts no stdin. Lecture/demo Preview still works; exercise Run / Test / Preview stay disabled until every previous tutorial step is currently complete.
 
 Use `terminal: "captured"` for commands that should return structured output, usually `test` or `check`.
 

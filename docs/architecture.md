@@ -68,7 +68,7 @@ Docker is the only registered lab provider. `RuntimeManager` selects it from the
 
 The workspace is logically owned by MultiLab through `WorkspaceService`. The physical IO strategy is `RuntimeProvider.workspaceStrategy`: bind-mount on Linux ext4, copy on Windows (`kind: "copy"`; `WORKSPACE_STRATEGY=runtime-internal` is still accepted as an alias).
 
-On Linux/WSL with a fast local filesystem (ext4/xfs/btrfs/tmpfs), Docker bind-mounts `.multilab-state/saves` to `/mlab/saves` **once** at container start (mode `711`, not in `$HOME`). Switching tutorials or steps does not recreate that Docker bind. It retargets `/home/student/workspace` at the current step `files/` dir with a symlink (one `ln -sfn`, not an inner `mount --bind`). Bash keeps cwd on the old inode after a symlink swap; already-open shells receive `SIGUSR1` so they `chdir` themselves. The learner-visible path stays `/home/student/workspace`. `WorkspaceService` reads, writes, lists, and watches the current step directory on the host. File-tree updates use host `fs.watch` on that directory plus `find -H` polling as a safety net. `find` without `-H` does not descend a symlink start path, so polling must pass `-H`.
+On Linux/WSL with a fast local filesystem (ext4/xfs/btrfs/tmpfs), Docker bind-mounts `.multilab-state/saves` to `/mlab/saves` **once** at container start (mode `711`, not in `$HOME`). Switching tutorials or steps does not recreate that Docker bind. It retargets `/home/student/workspace` at the current step `files/` dir with a symlink (`ln -sfn`, not an inner `mount --bind`, and not `rm`+`rmdir` of a live cwd). Bash keeps cwd on the old inode after a symlink swap; already-open shells receive `SIGUSR1` and also re-enter on a DEBUG trap before the next typed command. The persistent shell is attached at `/home/student`, then the profile snippet `chdir`s into the workspace. The learner-visible path stays `/home/student/workspace`. `WorkspaceService` reads, writes, lists, and watches the current step directory on the host. File-tree updates use host `fs.watch` on that directory plus `find -H` polling as a safety net. `find` without `-H` does not descend a symlink start path, so polling must pass `-H`.
 
 The container `student` uid is aligned to the host process uid so terminal `mkdir` and host Node share ownership. `EACCES` during host clear still falls back to a container-root wipe.
 
@@ -242,8 +242,10 @@ User clicks Run
 ```
 
 Declared interactive commands do not run inside the persistent learner shell.
-When a step is not editable, that shell accepts no stdin. Run is still allowed:
-stdin is routed to the command PTY only while it is active.
+When a step is not editable, that shell accepts no stdin. Lecture/demo Preview
+is still allowed: stdin is routed to the command PTY only while it is active.
+Exercise Run / Test / Preview, and persistent-shell input, require every previous
+tutorial step to be currently complete.
 
 ### Captured Command Flow
 
@@ -274,7 +276,7 @@ Current UI behavior:
 - File-tree is an editor accessory, toggled from the editor tab strip. There is no FILES header and no activity rail.
 - `test-results` still opens as an editor tab when declared.
 - Logs and diagnostics are one host drawer opened from a single 诊断 button. The drawer is one scroll: trust / kernel / reconnect, then session logs. No inner tabs.
-- Bottom bar: fixed-width prev/next on the left, `n / total · title` in the middle (ellipsis, must not push the buttons), current-step commands on the right (run / test / preview / reset, plus interrupt when a terminal is shown). No step-dot strip. Command buttons follow the current step's `commands[]`, not which windows exist.
+- Bottom bar: fixed-width prev/next on the left, a fixed-width nearby-five step-dot track (complete = green, incomplete = white, current = black ring; leading/trailing ellipsis keep the track width stable), `n / total · title` after the dots (ellipsis, must not push the buttons), current-step commands on the right (run / test / preview / reset / solution, plus interrupt when a terminal is shown). Command buttons follow the current step's `commands[]`, not which windows exist. Exercise commands stay disabled until every previous tutorial step is currently complete. Lecture/demo Preview stays enabled while read-only. 看答案 stays visible when `solution/` exists and is disabled until commands are allowed.
 - captured preview output may include `MULTILAB_PREVIEW_HTML` or HTML body for sandboxed `iframe.srcdoc` rendering;
 - `MULTILAB_PREVIEW_URL=...` is rewritten to a host-local mapped URL when the active Docker kernel publishes that container port (`publish_ports`, bound to `127.0.0.1`); otherwise it remains text with guidance to use `gcc-ubuntu24-docker-net` and `security.network_required` / `security.preview_ports`.
 - Packages that need network or preview ports resolve to `gcc-ubuntu24-docker-net` (bridge + sandbox + published ports). Offline packages still require `network_default: none`.
@@ -294,37 +296,41 @@ The shell runs as `student` in:
 /home/student/workspace
 ```
 
-When the current step is editable, terminal input goes to the persistent shell (gdb, REPLs, arbitrary commands). When it is not editable, the persistent shell accepts no stdin. While a declared command is running, stdin goes to that command PTY instead.
+When the current step currently allows exercise commands, terminal input goes to the persistent shell (gdb, REPLs, arbitrary commands). Otherwise the persistent shell accepts no stdin. While a declared command is running, stdin goes to that command PTY instead.
 
 Docker hijack streams are decoded with dockerode's `container.modem.demuxStream()`.
 
 ## Step State
 
-Each step has a package **template** (`steps/<id>/files/`), an optional **solution**, and — only after it becomes editable — a learner **archive** on the host save.
+Each step has a package **template** (`steps/<id>/files/`), an optional **solution**, and a learner **archive** on the host save. The archive exists only after a needs-edit step **becomes editable**.
 
 Author flags:
 
 - `needs_edit` (default true): exercise vs lecture/demo. Lecture/demo never get an archive.
-- `inherit_mode`: built-in archive constructor (`template` / `previous_save` / `overlay_template`). Authors do not write constructor code. `previous_save` and `overlay_template` require `chain`. Lecture/demo stay out of `chain`.
+- `inherit_mode`: built-in archive constructor (`template` / `previous_save` / `overlay_template`). It runs when this needs-edit step becomes editable. Authors do not write constructor code. `previous_save` and `overlay_template` require `chain`. Lecture/demo stay out of `chain`.
 
 Runtime flags:
 
 - complete / incomplete
 - editable / not editable (`needs_edit` only; sticky once true)
 
-Only tutorial step 0 starts editable, and only if it `needs_edit`. A still-not-editable exercise becomes editable when **every previous tutorial step is complete**. Already-editable steps stay editable if an earlier step later becomes incomplete.
+Only tutorial step 0 starts editable, and only if it `needs_edit`. A still-not-editable exercise becomes editable when **every previous tutorial step is complete**. That transition is when its archive is constructed. Already-editable steps stay editable if an earlier step later becomes incomplete. Command buttons on those later steps stay disabled until the previous steps are complete again.
 
 Completion:
 
-- lecture/demo: on enter, and only if every previous step is already complete. Browse-ahead does not complete it. Run is allowed. No archive.
+- lecture/demo: on enter, and only if every previous step is already complete. Browse-ahead does not complete it. Preview is allowed while read-only. No archive.
 - exercise with a test: archive passes that test (`test_passed` paired with `test_hash`)
 - exercise without a test: entered while already editable
 
-Not editable / lecture / demo: inject template into an ephemeral preview directory (not packed into `.mlab-save`). Monaco and persist APIs are read-only. Persistent bash accepts no stdin. Declared Run may take stdin for the running program only.
+Not editable / lecture / demo: inject template into an ephemeral preview directory (not packed into `.mlab-save`). Monaco and persist APIs are read-only. Persistent bash accepts no stdin unless the exercise currently allows commands. Lecture/demo Preview may take stdin for the running program only. Exercise commands stay disabled until every previous tutorial step is currently complete.
 
-Editable: inject the archive. Constructor runs once on first enter after it became editable. 重做 re-runs the constructor. 看答案 replaces the archive, clears test status, and does not auto-complete.
+Editable: inject the archive. For `previous_save` the copy is the previous chain archive after that previous step completed. 重做 re-runs the constructor. 看答案 replaces the archive, clears test status, and does not auto-complete. Once built, keep showing that archive if an earlier step later becomes incomplete.
+
+Browse-ahead while not editable must not create an archive. `save.json` `archive_built[step]` records that the constructor already ran; a directory without that flag is not an archive.
 
 `SaveService` owns this machine, host archive IO, preview paths, and write/command/shell gates. `WorkspaceService` still owns live workspace IO.
+
+Do not say 「锁住」 in learner-facing copy.
 
 ## Save Storage
 
@@ -354,7 +360,7 @@ The digest is a deterministic `sha256:<hex>` over the tutorial package directory
 multilab/.multilab-state/saves/<id>/<version>/<digest>/save.json
 ```
 
-Current metadata tracks package identity, `current_step`, visited steps, test pass/fail state per step, and `updated_at`. Step load/save/reset records the current step as visited. Captured commands with `type: "test"` update `test_passed[step]`.
+Current metadata tracks package identity, `current_step`, visited, `test_passed` / `test_hash`, `completed`, `editable`, `entered_editable`, `archive_built`, and `updated_at`. `archive_built[step]` means the constructor already ran for that unlock; a save directory without it is not an archive. Step load/save/reset records the current step as visited. Captured commands with `type: "test"` update `test_passed[step]`.
 
 Learner saves can be exported and imported as `.mlab-save` ZIP archives through `MlabSaveArchiveService`:
 

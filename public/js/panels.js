@@ -3,6 +3,7 @@ import {
   FALLBACK_PANELS,
   currentStepObj,
   stepCommand,
+  stepCommandEnabled,
 } from './state.js';
 import { t } from './messages.js';
 import { apiGet } from './api.js';
@@ -14,11 +15,13 @@ import { applyPreviewSplit } from './layout.js';
 const panelHooks = {
   selectStep: null,
   refreshTree: null,
+  onCommandsApplied: null,
 };
 
 export function setPanelHooks(hooks = {}) {
   if (hooks.selectStep) panelHooks.selectStep = hooks.selectStep;
   if (hooks.refreshTree) panelHooks.refreshTree = hooks.refreshTree;
+  if (hooks.onCommandsApplied) panelHooks.onCommandsApplied = hooks.onCommandsApplied;
 }
 
 function getPanelDecls() {
@@ -44,12 +47,13 @@ setViewOpenGuard((id) => panelDeclared(id));
 function applyProgressToUi() {
   renderProgressStrip(state.currentTutorial, state.currentProgress, {
     currentStepIndex: state.currentStep,
+    onSelectStep: panelHooks.selectStep,
   });
 }
 
 function applyStepCommands() {
   const step = currentStepObj();
-  const writable = Boolean(state.currentStepAccess?.editable) && !state.commandBusy;
+  const lecture = state.currentStepAccess?.needs_edit === false;
   const setShown = (id, shown) => {
     const el = document.getElementById(id);
     if (el) el.style.display = shown ? '' : 'none';
@@ -64,13 +68,15 @@ function applyStepCommands() {
   const terminal = panelDecl('terminal');
   setShown('interrupt-btn', Boolean(terminal && !terminal.hidden));
   const editor = panelDecl('editor');
-  setShown('revert-btn', Boolean(writable && editor && !editor.hidden));
-  setShown('solution-btn', Boolean(writable && state.currentStepAccess?.has_solution));
-  setDisabled('run-btn', state.commandBusy);
-  setDisabled('preview-btn', state.commandBusy);
-  setDisabled('test-btn', !writable);
-  setDisabled('revert-btn', !writable);
-  setDisabled('solution-btn', !writable);
+  setShown('revert-btn', Boolean(editor && !editor.hidden && !lecture));
+  setShown('solution-btn', Boolean(state.currentStepAccess?.has_solution && !lecture));
+  setDisabled('run-btn', !stepCommandEnabled('run'));
+  setDisabled('preview-btn', !stepCommandEnabled('preview'));
+  setDisabled('test-btn', !stepCommandEnabled('test'));
+  setDisabled('revert-btn', !stepCommandEnabled('revert'));
+  setDisabled('solution-btn', !stepCommandEnabled('solution'));
+  setDisabled('interrupt-btn', !stepCommandEnabled('interrupt'));
+  panelHooks.onCommandsApplied?.();
 }
 
 function applyProgress(progress) {

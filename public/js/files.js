@@ -10,7 +10,7 @@
  * This module re-exports the file-tree / file-picker public API so that
  * app.js keeps importing everything from './files.js'.
  */
-import { state, currentStepObj, currentTutorialKey, stepAccessWritable } from './state.js';
+import { state, currentStepObj, currentTutorialKey, stepAccessWritable, stepCommandsAllowed } from './state.js';
 import { apiJson } from './api.js';
 import { toast } from './ui.js';
 import { t } from './messages.js';
@@ -206,7 +206,7 @@ async function saveFile() {
 
 async function resetCurrentStep() {
   const step = currentStepObj();
-  if (!state.currentTutorial || !step || !stepAccessWritable()) return;
+  if (!state.currentTutorial || !step || !stepCommandsAllowed()) return;
   const ok = await confirmDialog({
     title: t('save.resetTitle'),
     body: t('save.resetBody', { title: step.title || step.id }),
@@ -238,7 +238,7 @@ async function resetCurrentStep() {
 
 async function applySolution() {
   const step = currentStepObj();
-  if (!state.currentTutorial || !step || !stepAccessWritable() || !state.currentStepAccess?.has_solution) return;
+  if (!state.currentTutorial || !step || !stepCommandsAllowed() || !state.currentStepAccess?.has_solution) return;
   const ok = await confirmDialog({
     title: t('save.solutionTitle'),
     body: t('save.solutionBody', { title: step.title || step.id }),

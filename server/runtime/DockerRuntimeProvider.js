@@ -10,7 +10,14 @@ import {
 import { chooseDockerWorkspaceStrategy, isSavesBindPath, SAVES_BIND_TARGET } from '../workspace/WorkspaceStrategy.js';
 import { ensureHostWorkspaceDir } from '../workspace/HostWorkspace.js';
 import { validateWorkspaceRelPath } from '../services/PackageService.js';
-import { learnerShellEnv, learnerProfileSnippet, signalAttachedShellsScript } from './learnerShellEnv.js';
+import {
+  learnerShellEnv,
+  learnerProfileSnippet,
+  signalAttachedShellsScript,
+  repairWorkspaceCwdScript,
+  retargetWorkspaceScript,
+  LEARNER_HOME,
+} from './learnerShellEnv.js';
 import { describeCapabilities, describeProbe } from './RuntimeContract.js';
 
 export class DockerRuntimeProvider extends RuntimeProvider {
@@ -218,17 +225,10 @@ export class DockerRuntimeSession extends RuntimeSession {
   }
 
   async #repairWorkspaceCwd() {
-    const quotedWs = shQuote(this.workspaceDir);
-    const result = await this.exec(['bash', '-lc', `
-set -e
-mkdir -p ${shQuote(SAVES_BIND_TARGET)}
-if [ -L ${quotedWs} ] && [ ! -e ${quotedWs} ]; then
-  rm -f ${quotedWs}
-fi
-if [ ! -e ${quotedWs} ]; then
-  mkdir -p ${quotedWs}
-fi
-`], { user: 'root', cwd: '/' });
+    const result = await this.exec(['bash', '-lc', repairWorkspaceCwdScript()], {
+      user: 'root',
+      cwd: '/',
+    });
     if (result.exitCode !== 0) {
       throw new Error(result.stderr || 'failed to ensure /home/student/workspace');
     }
@@ -240,17 +240,13 @@ fi
     if (!isSavesBindPath(target)) {
       throw Object.assign(new Error('workspace target escapes save bind'), { statusCode: 403 });
     }
-    const quotedTarget = shQuote(target);
     const quotedWs = shQuote(this.workspaceDir);
     const signal = signalAttachedShellsScript();
-    // One exec: retarget the symlink, then SIGUSR1 open shells. Do not rewrite
-    // profile.d here — that was a docker exec on every step switch.
+    // One exec: retarget the symlink, bump the gen stamp, then SIGUSR1.
+    // Do not rm the symlink first — that orphans the learner cwd.
     const script = `
 set -e
-mkdir -p ${quotedTarget}
-if [ -L ${quotedWs} ]; then rm -f ${quotedWs}; fi
-rmdir ${quotedWs} 2>/dev/null || true
-ln -sfn ${quotedTarget} ${quotedWs}
+${retargetWorkspaceScript(target)}
 ${signal}
 `;
     let result = await this.exec(['bash', '-lc', script], { user: 'root', cwd: '/' });
@@ -260,9 +256,7 @@ set -e
 if mountpoint -q ${quotedWs} 2>/dev/null; then
   umount ${quotedWs} 2>/dev/null || umount -l ${quotedWs} 2>/dev/null || true
 fi
-if [ -L ${quotedWs} ]; then rm -f ${quotedWs}; fi
-rmdir ${quotedWs} 2>/dev/null || true
-ln -sfn ${quotedTarget} ${quotedWs}
+${retargetWorkspaceScript(target)}
 ${signal}
 `;
       result = await this.exec(['bash', '-lc', recover], {
@@ -282,6 +276,10 @@ ${signal}
 cat > /etc/profile.d/multilab-workspace.sh << 'EOF'
 ${snippet}EOF
 chmod 644 /etc/profile.d/multilab-workspace.sh
+touch /home/student/.bashrc
+grep -q profile.d/multilab-workspace.sh /home/student/.bashrc 2>/dev/null || \
+  printf '\\n. /etc/profile.d/multilab-workspace.sh\\n' >> /home/student/.bashrc
+chown student:student /home/student/.bashrc
 `], { user: 'root', cwd: '/' });
     if (result.exitCode !== 0) {
       console.warn(`[docker] learner shell hook not installed: ${result.stderr || result.stdout}`);
@@ -483,7 +481,7 @@ done
       AttachStderr: true,
       Tty: true,
       User: 'student',
-      WorkingDir: this.workspaceDir,
+      WorkingDir: LEARNER_HOME,
       Env: learnerShellEnv(),
     });
     const shellStream = await shellExec.start({ hijack: true, stdin: true });

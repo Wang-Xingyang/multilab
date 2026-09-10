@@ -17,6 +17,12 @@ export const LEARNER_WORKSPACE = DEFAULT_WORKSPACE_LOCATION;
 export const LEARNER_SAVES = SAVES_BIND_TARGET;
 export const LEARNER_SAVES_LEGACY = LEGACY_SAVES_BIND_TARGET;
 export const LEARNER_SHELL_PID_DIR = '/tmp/multilab-shells';
+export const WORKSPACE_IDLE = '/tmp/mlab-workspace-idle';
+export const WORKSPACE_GEN_FILE = '/tmp/multilab-ws-gen';
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
 
 function hideSaveTree(pwd, saves, workspace, home) {
   const p = String(pwd || '');
@@ -81,6 +87,63 @@ export function reenterWorkspaceCommand(workspace = LEARNER_WORKSPACE) {
 }
 
 /**
+ * Keep /home/student/workspace as a symlink. A real directory there is the
+ * image WORKDIR; rmdir/replace while bash has that cwd leaves a deleted
+ * inode ("No such file or directory") and later `touch` writes nowhere useful.
+ */
+export function repairWorkspaceCwdScript({
+  workspace = LEARNER_WORKSPACE,
+  idle = WORKSPACE_IDLE,
+  saves = LEARNER_SAVES,
+} = {}) {
+  const ws = shellQuote(workspace);
+  const idleDir = shellQuote(idle);
+  const savesDir = shellQuote(saves);
+  return `
+set -e
+mkdir -p ${savesDir} ${idleDir}
+chmod 777 ${idleDir}
+if [ -L ${ws} ] && [ ! -e ${ws} ]; then
+  rm -f ${ws}
+fi
+if [ -d ${ws} ] && [ ! -L ${ws} ]; then
+  aside=${ws}.mlab-aside-$$
+  mv ${ws} "$aside"
+  rm -rf "$aside" || true
+fi
+if [ ! -e ${ws} ]; then
+  ln -sfn ${idleDir} ${ws}
+fi
+`;
+}
+
+/**
+ * Replace the workspace symlink in place. Do not `rm` the link first: that
+ * window makes `touch` fail with a missing cwd. `ln -sfn` replaces a symlink;
+ * a leftover real directory is moved aside first.
+ */
+export function retargetWorkspaceScript(targetPath, {
+  workspace = LEARNER_WORKSPACE,
+  genFile = WORKSPACE_GEN_FILE,
+} = {}) {
+  const ws = shellQuote(workspace);
+  const target = shellQuote(targetPath);
+  const gen = shellQuote(genFile);
+  return `
+set -e
+mkdir -p ${target}
+date +%s%N > ${gen} 2>/dev/null || echo $$ > ${gen}
+chmod 644 ${gen} 2>/dev/null || true
+if [ -d ${ws} ] && [ ! -L ${ws} ]; then
+  aside=${ws}.mlab-aside-$$
+  mv ${ws} "$aside"
+fi
+ln -sfn ${target} ${ws}
+rm -rf ${ws}.mlab-aside-$$ 2>/dev/null || true
+`;
+}
+
+/**
  * Signal only shells that registered a pid file (they installed the USR1 trap).
  * Never fake-type `cd` into the learner TTY — readline would echo it.
  */
@@ -112,36 +175,32 @@ done
 export function learnerProfileSnippet() {
   const bounce = reenterWorkspaceCommand();
   return `# MultiLab: keep the learner shell on the logical workspace path.
+[ -n "\${MULTILAB_SHELL_HOOK-}" ] && return 0
+MULTILAB_SHELL_HOOK=1
+MULTILAB_WS_GEN_SEEN=
 multilab_reenter_workspace() {
   local old="\${OLDPWD-}"
   ${bounce} >/dev/null 2>&1 || return 0
   if [ -n "$old" ]; then OLDPWD="$old"; fi
 }
+multilab_sync_workspace() {
+  [ -n "\${MULTILAB_WS_SYNCING-}" ] && return 0
+  MULTILAB_WS_SYNCING=1
+  local gen
+  gen=$(cat ${WORKSPACE_GEN_FILE} 2>/dev/null || true)
+  if [ "$gen" != "$MULTILAB_WS_GEN_SEEN" ]; then
+    MULTILAB_WS_GEN_SEEN=$gen
+    multilab_reenter_workspace
+  fi
+  MULTILAB_WS_SYNCING=
+}
 mkdir -p ${LEARNER_SHELL_PID_DIR} 2>/dev/null || true
 chmod 700 ${LEARNER_SHELL_PID_DIR} 2>/dev/null || true
 echo $$ > "${LEARNER_SHELL_PID_DIR}/$$" 2>/dev/null || true
-trap 'multilab_reenter_workspace' USR1
+trap 'multilab_sync_workspace' USR1
 trap 'rm -f "${LEARNER_SHELL_PID_DIR}/$$"' EXIT
+trap 'multilab_sync_workspace' DEBUG
 multilab_reenter_workspace
-multilab_fix_cwd() {
-  local phys logical target rel
-  phys=$(pwd -P 2>/dev/null) || return 0
-  logical=$(pwd -L 2>/dev/null) || return 0
-  case "$phys" in
-    ${LEARNER_SAVES}/*|${LEARNER_SAVES_LEGACY}/*) ;;
-    *) return 0 ;;
-  esac
-  target=$(readlink -f ${LEARNER_WORKSPACE} 2>/dev/null || true)
-  [ -z "$target" ] && return 0
-  case "$phys" in
-    "$target"|"$target"/*) return 0 ;;
-  esac
-  rel="\${logical#${LEARNER_WORKSPACE}}"
-  multilab_reenter_workspace
-  if [ -n "$rel" ] && [ "$rel" != "$logical" ]; then
-    cd -L "${LEARNER_WORKSPACE}$rel" 2>/dev/null || true
-  fi
-}
-PROMPT_COMMAND="multilab_fix_cwd\${PROMPT_COMMAND:+;\$PROMPT_COMMAND}"
+PROMPT_COMMAND="multilab_sync_workspace\${PROMPT_COMMAND:+;\$PROMPT_COMMAND}"
 `;
 }

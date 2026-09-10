@@ -449,9 +449,9 @@ app.post('/api/steps/load', async (req, res) => {
   try {
     const { tutorial, step } = req.body;
     if (!tutorial || !step) return res.status(400).json({ error: 'tutorial and step required' });
-    res.json(await saveService.loadStepState(tutorial, step));
+    res.json(await saveService.runExclusive(() => saveService.loadStepState(tutorial, step)));
   } catch (e) {
-    res.status(e.statusCode || 500).json({ error: e.message });
+    res.status(e.statusCode || 500).json({ error: e.message, code: e.code });
   }
 });
 
@@ -460,7 +460,7 @@ app.post('/api/steps/save', async (req, res) => {
   try {
     const { tutorial, step, files, ui, generation } = req.body;
     if (!tutorial || !step) return res.status(400).json({ error: 'tutorial and step required' });
-    res.json(await saveService.saveStepState(tutorial, step, files, { ui, generation }));
+    res.json(await saveService.runExclusive(() => saveService.saveStepState(tutorial, step, files, { ui, generation })));
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message, code: e.code });
   }
@@ -471,7 +471,7 @@ app.post('/api/steps/reset', async (req, res) => {
   try {
     const { tutorial, step, generation } = req.body;
     if (!tutorial || !step) return res.status(400).json({ error: 'tutorial and step required' });
-    res.json(await saveService.resetStepState(tutorial, step, { generation }));
+    res.json(await saveService.runExclusive(() => saveService.resetStepState(tutorial, step, { generation })));
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message, code: e.code });
   }
@@ -481,7 +481,7 @@ app.post('/api/steps/solution', async (req, res) => {
   try {
     const { tutorial, step, generation } = req.body;
     if (!tutorial || !step) return res.status(400).json({ error: 'tutorial and step required' });
-    res.json(await saveService.applySolution(tutorial, step, { generation }));
+    res.json(await saveService.runExclusive(() => saveService.applySolution(tutorial, step, { generation })));
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message, code: e.code });
   }

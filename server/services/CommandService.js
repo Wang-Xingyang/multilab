@@ -1,4 +1,4 @@
-import { validateSafePath } from './PackageService.js';
+import { validateSafePath, stepAllowsReadOnlyCommand } from './PackageService.js';
 import { buildPreviewMeta } from './PreviewPortMap.js';
 import { capturedTimeoutMs } from '../runtime/RuntimeContract.js';
 import crypto from 'crypto';
@@ -35,7 +35,7 @@ export class CommandService {
     if (this.saveService) {
       await this.saveService.assertStepCommand(tutorial, step, {
         generation,
-        requireEditable: commandSpec.command.type === 'test',
+        requireEditable: !stepAllowsReadOnlyCommand(commandSpec.step, commandSpec.command.type),
       });
     }
 
@@ -100,7 +100,7 @@ export class CommandService {
     if (this.saveService) {
       await this.saveService.assertStepCommand(tutorial, step, {
         generation,
-        requireEditable: commandSpec.command.type === 'test',
+        requireEditable: !stepAllowsReadOnlyCommand(commandSpec.step, commandSpec.command.type),
       });
     }
     if (completionToken) {

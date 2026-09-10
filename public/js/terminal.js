@@ -1,4 +1,4 @@
-import { state, TERM_THEME, currentTutorialKey, currentStepObj } from './state.js';
+import { state, TERM_THEME, currentTutorialKey, currentStepObj, stepShellInputAllowed } from './state.js';
 import { toast, status } from './ui.js';
 import { t } from './messages.js';
 import { applyStepCommands } from './panels.js';
@@ -8,6 +8,16 @@ import { applyStepCommands } from './panels.js';
 let fsChangeCallback = null;
 export function setFileTreeChangeCallback(fn) {
   fsChangeCallback = typeof fn === 'function' ? fn : null;
+}
+
+export function applyTerminalInputGate() {
+  if (!state.term) return;
+  const allowed = stepShellInputAllowed();
+  try {
+    state.term.options.disableStdin = !allowed;
+  } catch {
+    // xterm may not be ready yet
+  }
 }
 
 // ========== xterm ==========
@@ -35,8 +45,7 @@ export function initTerminal() {
     if (state.fitAddon) state.fitAddon.fit();
     window.addEventListener('resize', () => state.fitAddon && state.fitAddon.fit());
     state.term.onData((data) => {
-      const writable = Boolean(state.currentStepAccess?.editable) || Boolean(state.commandBusy);
-      if (!writable) return;
+      if (!stepShellInputAllowed()) return;
       if (state.ws && state.ws.readyState === WebSocket.OPEN) {
         state.ws.send(JSON.stringify({
           type: 'input',
@@ -47,6 +56,7 @@ export function initTerminal() {
         }));
       }
     });
+    applyTerminalInputGate();
   } catch (e) {
     console.error('[MultiLab] terminal init failed:', e);
     state.term = null;
@@ -87,6 +97,7 @@ export function initWS() {
         reconnectWS({ reason: 'runtime replaced' });
         return;
       }
+      if (msg.code === 'step_inactive' || msg.code === 'step_stale') return;
       toast(msg.message, true);
       if (state.term) state.term.write(`\r\n\x1b[31m${t('ws.errorBanner', { error: msg.message })}\x1b[0m\r\n`);
     }

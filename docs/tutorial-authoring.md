@@ -103,12 +103,12 @@ Required:
 Optional:
 
 - `chain`: group id for archive constructors on continuous projects. Lecture/demo stay out of `chain`.
-- `needs_edit`: default `true`. Set `false` for lecture/demo steps (no archive; Run is still allowed).
+- `needs_edit`: default `true`. Set `false` for lecture/demo steps (no archive; Preview is still allowed while read-only).
 - `entry_file`: default editor tab when this step has no saved UI state. The player does not open every workspace file.
 
 ## `inherit_mode`
 
-`inherit_mode` selects a built-in archive constructor. It runs once when a needs-edit step first becomes editable and the learner enters it. 重做 runs it again. Authors do not write constructor code.
+`inherit_mode` selects a built-in archive constructor. It runs when this needs-edit step becomes editable (every previous tutorial step is complete). Until then the learner may browse the step and only sees this step's template; no archive is created. 重做 runs the constructor again. Authors do not write constructor code.
 
 ```text
 template

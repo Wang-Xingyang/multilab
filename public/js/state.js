@@ -15,6 +15,7 @@ export const EMPTY_STEP_ACCESS = {
   needs_edit: true,
   has_solution: false,
   complete: false,
+  commands_allowed: false,
   generation: null,
 };
 
@@ -81,6 +82,37 @@ export function currentTutorialKey() {
 
 export function stepAccessWritable() {
   return Boolean(state.currentStepAccess?.editable) && !state.commandBusy;
+}
+
+export function previousStepsComplete() {
+  const steps = state.currentTutorial?.steps || [];
+  const idx = state.currentStep;
+  const completed = state.currentProgress?.completed || {};
+  for (let i = 0; i < idx; i++) {
+    if (!completed[steps[i]?.id]) return false;
+  }
+  return true;
+}
+
+export function stepCommandsAllowed() {
+  if (state.commandBusy) return false;
+  if (state.currentStepAccess?.needs_edit === false) return true;
+  if (!state.currentStepAccess?.editable) return false;
+  if (state.currentStepAccess?.commands_allowed === false) return false;
+  return previousStepsComplete();
+}
+
+export function stepShellInputAllowed() {
+  if (state.commandBusy) return true;
+  if (state.currentStepAccess?.needs_edit === false) return false;
+  return stepCommandsAllowed();
+}
+
+export function stepCommandEnabled(type) {
+  if (type === 'interrupt') return Boolean(state.commandBusy);
+  if (state.commandBusy) return false;
+  if (state.currentStepAccess?.needs_edit === false) return type === 'preview';
+  return stepCommandsAllowed();
 }
 
 export function stepCommand(step, type) {

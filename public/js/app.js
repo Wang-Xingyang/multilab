@@ -4,7 +4,7 @@ import { toast } from './ui.js';
 import { initTheme } from './theme.js';
 import { renderTrustButton } from './kernel.js';
 import { initLayout } from './layout.js';
-import { initTerminal, initWS, reconnectWS, setFileTreeChangeCallback } from './terminal.js';
+import { initTerminal, initWS, reconnectWS, setFileTreeChangeCallback, applyTerminalInputGate } from './terminal.js';
 import {
   setPanelHooks,
   toggleFileTree,
@@ -77,6 +77,7 @@ applyStaticCopy();
 setPanelHooks({
   selectStep: (index) => enterStep(index),
   refreshTree: (force) => refreshFileTree(force),
+  onCommandsApplied: () => applyTerminalInputGate(),
 });
 
 // 教程列表不依赖 Monaco: 编辑器加载失败/超时也要能阅读教程。

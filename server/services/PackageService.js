@@ -80,6 +80,10 @@ export function stepNeedsEdit(step) {
   return step?.needs_edit !== false;
 }
 
+export function stepAllowsReadOnlyCommand(step, commandType) {
+  return !stepNeedsEdit(step) && commandType === 'preview';
+}
+
 export function stepHasTest(step) {
   return (step?.commands || []).some(cmd => cmd && cmd.type === 'test');
 }

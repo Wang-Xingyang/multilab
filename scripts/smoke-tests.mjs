@@ -15,7 +15,7 @@ import { fileURLToPath } from 'url';
 
 import { normalizePanels, resolveStepPanels, FALLBACK_PANELS } from '../server/services/PanelModel.js';
 import { createDefaultKernelRegistry, packageNeedsNetwork } from '../server/services/KernelRegistry.js';
-import { PackageService, validateWorkspaceRelPath, contentAssetResponseHeaders } from '../server/services/PackageService.js';
+import { PackageService, validateWorkspaceRelPath, contentAssetResponseHeaders, stepAllowsReadOnlyCommand } from '../server/services/PackageService.js';
 import { SaveService } from '../server/services/SaveService.js';
 import {
   WorkspaceService,
@@ -51,6 +51,9 @@ import {
   learnerShellEnv,
   reenterWorkspaceCommand,
   signalAttachedShellsScript,
+  repairWorkspaceCwdScript,
+  retargetWorkspaceScript,
+  WORKSPACE_IDLE,
 } from '../server/runtime/learnerShellEnv.js';
 import { MlabSaveArchiveService } from '../server/services/MlabSaveArchiveService.js';
 import { KernelSelectionStore } from '../server/services/KernelSelectionStore.js';
@@ -63,7 +66,7 @@ import {
   buildPreviewMeta,
 } from '../server/services/PreviewPortMap.js';
 import { t, getCatalog } from '../public/js/messages.js';
-import { normalizeProgress, stepIndexFromId } from '../public/js/progress.js';
+import { normalizeProgress, stepIndexFromId, visibleStepWindow, stepDotSlots } from '../public/js/progress.js';
 import {
   rewriteAssetHref,
   rewriteLinkHref,
@@ -1007,10 +1010,17 @@ await test('learner shell re-enters workspace through / after a retarget', () =>
   assert.equal(reenterWorkspaceCommand(), 'cd / && cd -L /home/student/workspace');
   const snippet = learnerProfileSnippet();
   assert.ok(snippet.includes('cd / && cd -L /home/student/workspace'), 'must bounce through /; cd -L $PWD is a no-op');
-  assert.ok(snippet.includes("trap 'multilab_reenter_workspace' USR1"), 'open shells re-enter via SIGUSR1, not TTY injection');
+  assert.ok(snippet.includes("trap 'multilab_sync_workspace' USR1"), 'open shells re-enter via SIGUSR1, not TTY injection');
+  assert.ok(snippet.includes("trap 'multilab_sync_workspace' DEBUG"), 'DEBUG trap re-enters before the next typed command');
   assert.ok(snippet.includes('/tmp/multilab-shells'));
   assert.ok(signalAttachedShellsScript().includes('kill -USR1'));
   assert.ok(!snippet.includes('\\x15'), 'must not fake-type into the learner TTY');
+  const repair = repairWorkspaceCwdScript();
+  assert.ok(repair.includes(`ln -sfn '${WORKSPACE_IDLE}'`), 'idle landing pad is a symlink, not a real workspace dir');
+  assert.ok(!repair.includes('mkdir -p \'/home/student/workspace\''), 'must not mkdir a real directory at workspace');
+  const retarget = retargetWorkspaceScript('/mlab/saves/hello-c/1.0.0/sha256-x/steps/02-first-program/files');
+  assert.ok(retarget.includes('ln -sfn'), 'retarget replaces the workspace symlink');
+  assert.ok(!retarget.includes('rm -f \'/home/student/workspace\''), 'must not unlink workspace before ln; that orphans cwd');
 });
 
 await test('SaveService.loadStepState template inherit syncs into workspace', async () => {
@@ -1239,6 +1249,16 @@ await test('stepIndexFromId: returns index or -1', () => {
   assert.equal(stepIndexFromId(null, 's1'), -1);
   assert.equal(stepIndexFromId({ steps: [] }, 's1'), -1);
 });
+await test('visibleStepWindow keeps a five-dot neighborhood', () => {
+  assert.deepEqual(visibleStepWindow(3, 0), { start: 0, end: 3, lead: false, trail: false });
+  assert.deepEqual(visibleStepWindow(9, 0), { start: 0, end: 5, lead: false, trail: true });
+  assert.deepEqual(visibleStepWindow(9, 4), { start: 2, end: 7, lead: true, trail: true });
+  assert.deepEqual(visibleStepWindow(9, 8), { start: 4, end: 9, lead: true, trail: false });
+});
+await test('stepDotSlots pads short tutorials inside the fixed window', () => {
+  assert.deepEqual(stepDotSlots(3, 1).slots, [null, 0, 1, 2, null]);
+  assert.deepEqual(stepDotSlots(9, 0).slots, [0, 1, 2, 3, 4]);
+});
 
 console.log('\n--- frontend content-renderer.js (pure helpers) ---');
 await test('rewriteAssetHref: package-relative images become asset API URLs', () => {
@@ -1277,14 +1297,44 @@ await test('SaveService keeps later steps read-only until earlier ones complete'
     const { saveService, packageService } = createSaveService(tmp);
     const first = await openHelloCFirst(saveService);
     assert.equal(first.editable, true);
+    assert.equal(first.commands_allowed, true);
     assert.equal(first.hasOwnSave, true);
     const later = await saveService.loadStepState('hello-c', HELLO_C.keep);
     assert.equal(later.editable, false);
+    assert.equal(later.commands_allowed, false);
     assert.equal(later.hasOwnSave, false);
     const cfg = await packageService.loadTutorial('hello-c');
     await assert.rejects(() => fs.access(saveService.saveDir(cfg, HELLO_C.keep)), (e) => e.code === 'ENOENT');
     await assert.rejects(
       () => saveService.saveStepState('hello-c', HELLO_C.keep, [{ name: 'hello.c', content: 'nope\n' }]),
+      (e) => e.code === 'not_editable'
+    );
+    await assert.rejects(
+      async () => saveService.assertStepCommand('hello-c', HELLO_C.keep, { requireEditable: true }),
+      (e) => e.code === 'not_editable'
+    );
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('read-only steps only allow lecture preview commands', async () => {
+  const lecture = { needs_edit: false };
+  const exercise = {};
+  assert.equal(stepAllowsReadOnlyCommand(lecture, 'preview'), true);
+  assert.equal(stepAllowsReadOnlyCommand(lecture, 'run'), false);
+  assert.equal(stepAllowsReadOnlyCommand(lecture, 'test'), false);
+  assert.equal(stepAllowsReadOnlyCommand(exercise, 'preview'), false);
+  assert.equal(stepAllowsReadOnlyCommand(exercise, 'run'), false);
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-smoke-'));
+  try {
+    const { saveService } = createSaveService(tmp);
+    const loaded = await saveService.loadStepState('hello-c', HELLO_C.lecture);
+    assert.equal(loaded.editable, false);
+    assert.equal(loaded.needs_edit, false);
+    saveService.assertStepCommand('hello-c', HELLO_C.lecture, { requireEditable: false });
+    await assert.rejects(
+      async () => saveService.assertStepCommand('hello-c', HELLO_C.lecture, { requireEditable: true }),
       (e) => e.code === 'not_editable'
     );
   } finally {
@@ -1300,12 +1350,125 @@ await test('SaveService unlocks previous_save after a passing test', async () =>
     await saveService.recordTestResult('hello-c', HELLO_C.first, true);
     const later = await saveService.loadStepState('hello-c', HELLO_C.keep);
     assert.equal(later.editable, true);
+    assert.equal(later.commands_allowed, true);
     assert.equal(later.hasOwnSave, true);
     assert.equal(later.inheritMode, 'previous_save');
     const cfg = await packageService.loadTutorial('hello-c');
     const names = await fs.readdir(saveService.saveDir(cfg, HELLO_C.keep));
     assert.ok(names.includes('hello.c'));
     assert.ok(!names.includes('args.c'));
+    const firstHello = await fs.readFile(path.join(saveService.saveDir(cfg, HELLO_C.first), 'hello.c'), 'utf8');
+    const keepHello = await fs.readFile(path.join(saveService.saveDir(cfg, HELLO_C.keep), 'hello.c'), 'utf8');
+    assert.equal(keepHello, firstHello);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('failing a test does not unlock the next step', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-smoke-'));
+  try {
+    const { saveService } = createSaveService(tmp);
+    await openHelloCFirst(saveService);
+    await saveService.recordTestResult('hello-c', HELLO_C.first, true);
+    await saveService.recordTestResult('hello-c', HELLO_C.first, false);
+    const later = await saveService.loadStepState('hello-c', HELLO_C.keep);
+    assert.equal(later.editable, false);
+    assert.equal(later.commands_allowed, false);
+    assert.equal(later.hasOwnSave, false);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('sticky editable does not keep later-step commands enabled', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-smoke-'));
+  try {
+    const { saveService } = createSaveService(tmp);
+    await openHelloCFirst(saveService);
+    await saveService.recordTestResult('hello-c', HELLO_C.first, true);
+    const unlocked = await saveService.loadStepState('hello-c', HELLO_C.keep);
+    assert.equal(unlocked.editable, true);
+    assert.equal(unlocked.commands_allowed, true);
+    await saveService.loadStepState('hello-c', HELLO_C.first);
+    await saveService.recordTestResult('hello-c', HELLO_C.first, false);
+    const keep = await saveService.loadStepState('hello-c', HELLO_C.keep);
+    assert.equal(keep.editable, true);
+    assert.equal(keep.hasOwnSave, true);
+    assert.equal(keep.commands_allowed, false);
+    await assert.rejects(
+      async () => saveService.assertStepCommand('hello-c', HELLO_C.keep, { requireEditable: true }),
+      (e) => e.code === 'not_editable'
+    );
+    await assert.rejects(
+      async () => saveService.assertShellInput('hello-c', HELLO_C.keep),
+      (e) => e.code === 'not_editable'
+    );
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('previous_save waits for a completed previous step before freezing the archive', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-smoke-'));
+  try {
+    const { saveService, packageService } = createSaveService(tmp);
+    await openHelloCFirst(saveService);
+    const peek = await saveService.loadStepState('hello-c', HELLO_C.keep);
+    assert.equal(peek.hasOwnSave, false);
+    const cfg = await packageService.loadTutorial('hello-c');
+    await saveService.loadStepState('hello-c', HELLO_C.first);
+    const mine = '#include <stdio.h>\nint main(void) { puts("mine"); return 0; }\n';
+    await saveService.saveStepState('hello-c', HELLO_C.first, [{ name: 'hello.c', content: mine }]);
+    await saveService.recordTestResult('hello-c', HELLO_C.first, true);
+    const later = await saveService.loadStepState('hello-c', HELLO_C.keep);
+    const hello = later.files.find(file => file.name === 'hello.c');
+    assert.equal(hello?.content, mine);
+    assert.equal(
+      await fs.readFile(path.join(saveService.saveDir(cfg, HELLO_C.keep), 'hello.c'), 'utf8'),
+      mine
+    );
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('previous_save rebuilds a premature archive after the previous test passes', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-smoke-'));
+  try {
+    const { saveService, packageService } = createSaveService(tmp);
+    await openHelloCFirst(saveService);
+    const cfg = await packageService.loadTutorial('hello-c');
+    const keepDir = saveService.saveDir(cfg, HELLO_C.keep);
+    await fs.mkdir(keepDir, { recursive: true });
+    await fs.writeFile(path.join(keepDir, 'hello.c'), 'OLD PREVIEW COPY\n');
+    await saveService.loadStepState('hello-c', HELLO_C.first);
+    const mine = '#include <stdio.h>\nint main(void) { puts("after-test"); return 0; }\n';
+    await saveService.saveStepState('hello-c', HELLO_C.first, [{ name: 'hello.c', content: mine }]);
+    await saveService.recordTestResult('hello-c', HELLO_C.first, true);
+    const later = await saveService.loadStepState('hello-c', HELLO_C.keep);
+    const hello = later.files.find(file => file.name === 'hello.c');
+    assert.equal(hello?.content, mine);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('existing template archive is not rebuilt just because archive_built is missing', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-smoke-'));
+  try {
+    const { saveService, packageService } = createSaveService(tmp);
+    await openHelloCFirst(saveService);
+    const mine = '#include <stdio.h>\nint main(void) { puts("keep-edits"); return 0; }\n';
+    await saveService.saveStepState('hello-c', HELLO_C.first, [{ name: 'hello.c', content: mine }]);
+    const cfg = await packageService.loadTutorial('hello-c');
+    const metaPath = saveService.saveMetadataPath(cfg);
+    const metadata = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+    delete metadata.archive_built;
+    await fs.writeFile(metaPath, JSON.stringify(metadata, null, 2) + '\n');
+    const loaded = await saveService.loadStepState('hello-c', HELLO_C.first);
+    const hello = loaded.files.find(file => file.name === 'hello.c');
+    assert.equal(hello?.content, mine);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
@@ -1318,6 +1481,7 @@ await test('SaveService completes a lecture on eligible enter without an archive
     const loaded = await saveService.loadStepState('hello-c', HELLO_C.lecture);
     assert.equal(loaded.needs_edit, false);
     assert.equal(loaded.editable, false);
+    assert.equal(loaded.commands_allowed, true);
     assert.equal(loaded.complete, true);
     assert.equal(loaded.hasOwnSave, false);
     const cfg = await packageService.loadTutorial('hello-c');

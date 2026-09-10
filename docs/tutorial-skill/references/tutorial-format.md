@@ -80,7 +80,7 @@ Optional:
 ## `inherit_mode`
 
 - `template`: use this step's own starter files.
-- `previous_save`: inherit the previous save in the same chain.
+- `previous_save`: inherit the previous save in the same chain. The copy is taken when this step becomes editable, which is after every previous tutorial step is complete.
 - `overlay_template`: inherit previous save and add missing files from this step's template.
 
 ## Commands

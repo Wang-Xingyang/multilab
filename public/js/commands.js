@@ -1,4 +1,4 @@
-import { state, currentStepObj, currentTutorialKey, stepCommand, stepAccessWritable } from './state.js';
+import { state, currentStepObj, currentTutorialKey, stepCommand, stepCommandEnabled } from './state.js';
 import { apiJson } from './api.js';
 import { toast, status } from './ui.js';
 import { t } from './messages.js';
@@ -29,7 +29,7 @@ export async function runCode() {
     toast(t('commands.wsDisconnected'), true);
     return;
   }
-  if (!state.currentTutorial || state.commandBusy) return;
+  if (!state.currentTutorial || !stepCommandEnabled('run')) return;
   if (state.currentStepAccess?.editable) {
     try {
       await saveCurrentStep({ silent: true, force: true });
@@ -56,7 +56,7 @@ export async function runCode() {
 export async function runTest() {
   const step = currentStepObj();
   const command = stepCommand(step, 'test');
-  if (!state.currentTutorial || !command || !stepAccessWritable()) return;
+  if (!state.currentTutorial || !command || !stepCommandEnabled('test')) return;
   try {
     await saveCurrentStep({ silent: true, force: true });
     const res = await apiJson('/api/commands/run', {
@@ -87,7 +87,7 @@ export async function runTest() {
 export async function runPreview() {
   const step = currentStepObj();
   const command = stepCommand(step, 'preview');
-  if (!state.currentTutorial || !command || state.commandBusy) return;
+  if (!state.currentTutorial || !command || !stepCommandEnabled('preview')) return;
   try {
     if (state.currentStepAccess?.editable) {
       await saveCurrentStep({ silent: true, force: true });
