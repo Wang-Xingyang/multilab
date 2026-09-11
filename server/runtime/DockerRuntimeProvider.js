@@ -534,19 +534,44 @@ done
     stderrPipe.on('data', chunk => onOutput?.(chunk.toString('utf8')));
 
     let doneFired = false;
+    let poll = null;
+    const stopPoll = () => {
+      if (!poll) return;
+      clearInterval(poll);
+      poll = null;
+    };
     const fireDone = async () => {
       if (doneFired) return;
       doneFired = true;
+      stopPoll();
       let exitCode = null;
       try {
         const info = await commandExec.inspect();
         exitCode = typeof info.ExitCode === 'number' ? info.ExitCode : null;
       } catch {}
       onDone?.(exitCode);
+      try { commandStream.end(); } catch {}
+      setTimeout(() => {
+        try { commandStream.destroy(); } catch {}
+      }, 250);
     };
     commandStream.on('end', fireDone);
     commandStream.on('close', fireDone);
     commandStream.on('error', fireDone);
+
+    // Docker keeps hijacked TTY+stdin exec sockets open after the process
+    // exits, so stream 'end' never fires until the client sends Ctrl+C or
+    // closes stdin. Detect actual process exit via inspect().
+    poll = setInterval(async () => {
+      try {
+        const info = await commandExec.inspect();
+        if (info.Running) return;
+        stopPoll();
+        setTimeout(fireDone, 80);
+      } catch {
+        fireDone();
+      }
+    }, 50);
 
     return {
       write(data) {
@@ -559,7 +584,8 @@ done
         await commandExec.resize({ h: rows, w: cols });
       },
       close() {
-        commandStream.destroy();
+        stopPoll();
+        try { commandStream.destroy(); } catch {}
       },
     };
   }

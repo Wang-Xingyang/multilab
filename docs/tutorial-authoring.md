@@ -172,10 +172,10 @@ Execution modes:
 
 ```text
 interactive
-  Runs through the persistent terminal shell.
+  Dedicated command PTY. Output shares the bottom terminal. Ends when the process exits.
 
 captured
-  Runs through /api/commands/run and returns stdout/stderr/exitCode.
+  POST /api/commands/run. Test/check stdout opens in the 检查结果 editor tab, not the terminal.
 ```
 
 Example run command:
@@ -220,7 +220,7 @@ output=$(/tmp/test.out)
 echo "$output" | grep -q "Hello"
 ```
 
-Captured test commands pass when exit code is `0`.
+Captured test commands pass when exit code is `0`. Their output is shown in the 检查结果 tab.
 
 ## Preview
 
@@ -251,7 +251,7 @@ A lecture step can declare `"panels": ["tutorial", "web-preview"]` so the editor
 - Keep command scripts as real files referenced by manifest commands.
 - Do not inline instructions, source files, or scripts into the manifest.
 - Use `/home/student/workspace/<file>` in interactive run scripts.
-- Put build artifacts in `/tmp`, not in the workspace.
+- Put build artifacts in `/tmp`, not in the workspace. Do not mention player script paths (`/tmp/<step>.<cmd>.sh`) in instructions. If learners must type `gdb` on the run binary, that path must match `run.sh`.
 - Keep each step focused on one concept.
 - Add TODO markers where the learner should edit.
 - Prefer semantic ids such as `01-first-program`.

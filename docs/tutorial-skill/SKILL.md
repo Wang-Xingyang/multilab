@@ -87,9 +87,9 @@ Supported command types:
 
 ## Command Rules
 
-Use `terminal: "interactive"` for commands that should run in a dedicated command PTY, usually `run`. When a step is not editable, the persistent bash accepts no stdin. Lecture/demo Preview still works; exercise Run / Test / Preview stay disabled until every previous tutorial step is currently complete.
+Use `terminal: "interactive"` for commands that should run in a dedicated command PTY, usually `run`. The player ends that PTY when the process exits; a finite `gcc && ./a.out` does not need Ctrl+C. Keep stdin-holding programs (gdb, servers, REPLs) only when the step is actually interactive. When a step is not editable, the persistent bash accepts no stdin. Lecture/demo Preview still works; exercise Run / Test / Preview stay disabled until every previous tutorial step is currently complete.
 
-Use `terminal: "captured"` for commands that should return structured output, usually `test` or `check`.
+Use `terminal: "captured"` for commands that should return structured output, usually `test` or `check`. Captured stdout/stderr appears in the 检查结果 editor tab, not the persistent terminal. Pass/fail is a toast; do not assume learners will see `echo PASS` in xterm.
 
 For C/C++ run commands, reference workspace files with absolute container paths:
 
@@ -103,7 +103,7 @@ For test commands, relative paths are acceptable because tests execute with cwd:
 /home/student/workspace
 ```
 
-Put compiled binaries and temporary files under `/tmp`.
+Put compiled binaries and other temp files under `/tmp` so they stay out of the workspace file tree and step archive. The player also uploads command scripts to `/tmp/<step>.<cmd>.sh`; never mention that path in `instructions.md`. If a step tells the learner to run gdb on the run product, the path in the Markdown must match `run.sh` (hello-c uses `gdb /tmp/a.out`). Compiling to `./a.out` in the workspace is allowed, but the binary will show in the file tree and be saved (the completeness hash still ignores `a.out`).
 
 ## Authoring Rules
 
@@ -119,7 +119,7 @@ Put compiled binaries and temporary files under `/tmp`.
 - Use semantic step ids, for example `01-first-program`.
 - Avoid emoji and decorative Unicode.
 - Prefer short instructions that fit the left panel.
-- Declare `default_panels` as the windows this tutorial needs (`tutorial`, `editor`, `terminal`, `web-preview`, `file-tree`, `test-results`). Do not encode layout geometry; the player places tutorial left, editor | preview, and terminal at the bottom.
+- Declare `default_panels` as the windows this tutorial needs (`tutorial`, `editor`, `terminal`, `web-preview`, `file-tree`, `test-results`). Do not encode layout geometry; the player places tutorial left, editor | preview as peer columns, terminal at the bottom, and file-tree on the right of the editor (not as a third workspace column).
 - Optional per-step `panels` replaces that default for one step (same type names, or strings like `["tutorial", "web-preview"]`). Omit it to inherit the package set. Logs and diagnostics are host chrome, not step windows.
 
 ## Preview

@@ -55,16 +55,22 @@ async function wsCollect(tutorial, step, command, timeoutMs = 8000) {
     const ws = new WebSocket(`${BASE.replace(/^http/, 'ws')}/ws`);
     let out = '';
     let done = false;
-    const finish = () => { if (!done) { done = true; try { ws.close(); } catch {} resolve(out); } };
+    const finish = (err) => {
+      if (done) return;
+      done = true;
+      try { ws.close(); } catch {}
+      if (err) reject(err);
+      else resolve(out);
+    };
     ws.on('message', (raw) => {
       const msg = JSON.parse(raw.toString());
       if (msg.type === 'ready') ws.send(JSON.stringify({ type: 'command', tutorial, step, command }));
       else if (msg.type === 'output') out += msg.data;
-      else if (msg.type === 'status' && /running command/.test(msg.message)) setTimeout(finish, 2500);
-      else if (msg.type === 'error') { finish(); reject(new Error(msg.message)); }
+      else if (msg.type === 'command_done') finish();
+      else if (msg.type === 'error') finish(new Error(msg.message));
     });
-    ws.on('error', reject);
-    setTimeout(() => { finish(); reject(new Error('ws timeout')); }, timeoutMs);
+    ws.on('error', (e) => finish(e));
+    setTimeout(() => finish(new Error('ws timeout')), timeoutMs);
   });
 }
 

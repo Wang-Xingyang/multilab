@@ -65,8 +65,6 @@ export async function runTest() {
       command: command.id || command.type,
       generation: state.currentStepAccess?.generation,
     });
-    const color = res.passed ? '\x1b[32m' : '\x1b[31m';
-    state.term.write(`\r\n${color}[${res.passed ? 'PASS' : 'FAIL'}]\x1b[0m\r\n${res.output || ''}\r\n`);
     applyProgress(res.progress);
     showTestResults(res);
     appendSessionLog(

@@ -617,6 +617,7 @@ wss.on('connection', (ws) => {
               activeCommandHandle = null;
               commandToken = null;
               send({ type: 'command_done', exitCode });
+              try { terminal?.write('\n'); } catch {}
             },
           },
         });

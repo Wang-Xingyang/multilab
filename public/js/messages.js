@@ -52,6 +52,9 @@ const catalog = {
     errorBanner: '[错误] {error}',
     xtermMissing: '终端库未加载，请检查 /vendor/xterm',
   },
+  term: {
+    copyFailed: '复制失败',
+  },
   package: {
     pickMlab: '请选择 .mlab 文件',
     opening: '打开 .mlab...',

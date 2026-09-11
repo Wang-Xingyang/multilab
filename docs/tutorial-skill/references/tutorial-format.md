@@ -39,7 +39,7 @@ Recommended:
 - `security`
 - `default_panels`
 
-`default_panels` names which windows the package needs (`tutorial`, `editor`, `terminal`, `web-preview`, `file-tree`, `test-results`). It does not set geometry. The player auto-layouts: tutorial nailed left, editor and preview side by side when both are needed, terminal at the bottom of the work area, file-tree as an editor accessory. Logs and diagnostics are host chrome, not package windows. `area` is stored for compatibility and ignored.
+`default_panels` names which windows the package needs (`tutorial`, `editor`, `terminal`, `web-preview`, `file-tree`, `test-results`). It does not set geometry. The player auto-layouts: tutorial nailed left, editor and preview side by side when both are needed, terminal at the bottom of the work area, file-tree on the right of the editor (not a third workspace column). Captured test/check output opens as the `test-results` editor tab. Logs and diagnostics are host chrome, not package windows. `area` is stored for compatibility and ignored.
 
 A step may set `panels` to replace that default for that step only. Same types; strings (`"tutorial"`) or objects (`{ "type": "tutorial" }`) are both valid. Omit `panels` to inherit `default_panels`. An algorithm lecture step can use `["tutorial", "web-preview"]`; a later coding step can use `["tutorial", "editor", "terminal"]`.
 
@@ -109,8 +109,8 @@ Valid command types:
 
 Valid terminal modes:
 
-- `interactive`
-- `captured`
+- `interactive`: dedicated command PTY; ends when the process exits
+- `captured`: `/api/commands/run`; test/check output opens in the 检查结果 tab
 
 Script paths must be relative to the tutorial root and must not escape the package directory.
 

@@ -17,8 +17,11 @@ import { describeCapabilities } from './RuntimeContract.js';
  *   dispose
  *
  * Interactive declared commands run through attachCommand: a dedicated
- * exec PTY whose completion is the stream ending plus the inspected exit
- * code. Do not reintroduce stdout completion markers.
+ * exec PTY whose completion is exec.inspect() Running=false plus the
+ * inspected exit code — not the hijack socket closing. Docker keeps a
+ * TTY+stdin exec socket open after the process exits, so waiting only
+ * for stream end leaves Run hanging until Ctrl+C. Do not reintroduce
+ * stdout completion markers.
  *
  * CommandService / SaveService must not import dockerode.
  */

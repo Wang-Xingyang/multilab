@@ -20,9 +20,40 @@ export function applyTerminalInputGate() {
   }
 }
 
-// ========== xterm ==========
-// xterm 全局由 /vendor 脚本提供;若加载失败不要让整个模块图崩掉。
-// 导出为显式 initTerminal(), 由 app.js 调用。
+function copyTerminalSelection() {
+  const term = state.term;
+  const text = term?.getSelection?.() || '';
+  if (!text) return false;
+  const onCopy = (event) => {
+    event.clipboardData?.setData('text/plain', text);
+    event.preventDefault();
+  };
+  document.addEventListener('copy', onCopy);
+  try {
+    if (!document.execCommand('copy')) throw new Error('copy failed');
+    term.clearSelection();
+  } catch {
+    toast(t('term.copyFailed'), true);
+  } finally {
+    document.removeEventListener('copy', onCopy);
+  }
+  return true;
+}
+
+function shouldCopyChord(ev) {
+  if (ev.altKey || ev.key.toLowerCase() !== 'c') return false;
+  if (ev.metaKey && !ev.ctrlKey) return true;
+  if (ev.ctrlKey && ev.shiftKey) return true;
+  if (ev.ctrlKey && !ev.shiftKey && !ev.metaKey) return state.term?.hasSelection?.();
+  return false;
+}
+
+function shouldPasteChord(ev) {
+  if (ev.altKey || ev.key.toLowerCase() !== 'v') return false;
+  if (ev.metaKey && !ev.ctrlKey) return true;
+  return Boolean(ev.ctrlKey);
+}
+
 export function initTerminal() {
   const host = document.getElementById('terminal');
   if (!host) return;
@@ -44,6 +75,24 @@ export function initTerminal() {
     state.term.open(host);
     if (state.fitAddon) state.fitAddon.fit();
     window.addEventListener('resize', () => state.fitAddon && state.fitAddon.fit());
+    state.term.attachCustomKeyEventHandler((ev) => {
+      if (ev.type !== 'keydown') return true;
+      if (shouldCopyChord(ev)) {
+        ev.preventDefault();
+        copyTerminalSelection();
+        return false;
+      }
+      // Swallow Ctrl+V so xterm does not send ^V / preventDefault the paste event.
+      if (shouldPasteChord(ev)) return false;
+      return true;
+    });
+    host.addEventListener('paste', (event) => {
+      const text = event.clipboardData?.getData('text/plain') || '';
+      event.preventDefault();
+      event.stopPropagation();
+      if (!text || !stepShellInputAllowed() || !state.term) return;
+      state.term.paste(text.replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
+    }, true);
     state.term.onData((data) => {
       if (!stepShellInputAllowed()) return;
       if (state.ws && state.ws.readyState === WebSocket.OPEN) {

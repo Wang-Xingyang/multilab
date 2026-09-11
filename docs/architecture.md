@@ -238,7 +238,9 @@ User clicks Run
   backend writes script to /tmp/<step>.<command>.sh in the container
   backend runs it in a dedicated exec PTY (RuntimeSession.attachCommand)
   command output streams to xterm; stdin goes to the command PTY
-  exec stream end + inspected exit code → ws { type: "command_done", exitCode }
+  exec.inspect() Running=false + exit code → ws { type: "command_done", exitCode }
+  (Docker keeps a TTY+stdin hijack socket open after exit; do not wait only for stream end)
+  persistent bash receives a newline so the prompt returns
 ```
 
 Declared interactive commands do not run inside the persistent learner shell.
@@ -257,6 +259,7 @@ User clicks Check
   backend writes script to /tmp/<step>.<command>.sh
   backend runs it with containerExec(["bash", remoteScript])
   backend returns stdout, stderr, exitCode, passed
+  frontend shows output in the test-results editor tab (not xterm)
 ```
 
 The old `/api/test` and WebSocket `type: "run"` paths have been removed.
@@ -273,8 +276,8 @@ Current UI behavior:
 - Tutorial is nailed left and collapsible. Packages cannot move it. `area` on panel objects is stored for compatibility and ignored for geometry.
 - Editor and preview are optional peer columns (side by side when both are needed). Preview is an observation panel, not a file tab. Declaring `web-preview` (and not `hidden`) shows the column; a `type: "preview"` command also opens it. Visibility follows the **current step** (`step.ui_panels`), not only the package default.
 - Terminal stays at the bottom of the work area, never a third column.
-- File-tree is an editor accessory, toggled from the editor tab strip. There is no FILES header and no activity rail.
-- `test-results` still opens as an editor tab when declared.
+- File-tree is an editor accessory inside the editor column (right of Monaco), toggled from the editor tab strip. It is not a third workspace column and must not sit at the far right of the page when preview is open. There is no FILES header and no activity rail.
+- `test-results` still opens as an editor tab when declared. Captured Check/Test output goes there plus a toast; it is not written into the persistent terminal.
 - Logs and diagnostics are one host drawer opened from a single 诊断 button. The drawer is one scroll: trust / kernel / reconnect, then session logs. No inner tabs.
 - Bottom bar: fixed-width prev/next on the left, a fixed-width nearby-five step-dot track (complete = green, incomplete = white, current = black ring; leading/trailing ellipsis keep the track width stable), `n / total · title` after the dots (ellipsis, must not push the buttons), current-step commands on the right (run / test / preview / reset / solution, plus interrupt when a terminal is shown). Command buttons follow the current step's `commands[]`, not which windows exist. Exercise commands stay disabled until every previous tutorial step is currently complete. Lecture/demo Preview stays enabled while read-only. 看答案 stays visible when `solution/` exists and is disabled until commands are allowed.
 - captured preview output may include `MULTILAB_PREVIEW_HTML` or HTML body for sandboxed `iframe.srcdoc` rendering;
@@ -297,6 +300,8 @@ The shell runs as `student` in:
 ```
 
 When the current step currently allows exercise commands, terminal input goes to the persistent shell (gdb, REPLs, arbitrary commands). Otherwise the persistent shell accepts no stdin. While a declared command is running, stdin goes to that command PTY instead.
+
+Copy/paste: selection + Ctrl+C copies (then clears the selection); no selection sends SIGINT. Ctrl+Shift+C copies. Paste uses the browser `paste` event (`clipboardData`), not `navigator.clipboard.readText()`. The bottom-bar interrupt button is enabled only while an interactive declared command is running (`commandBusy`); it sends `\x03` to that command PTY.
 
 Docker hijack streams are decoded with dockerode's `container.modem.demuxStream()`.
 
@@ -479,5 +484,5 @@ The player auto-matches a compatible kernel on open (`recommended_kernel`, then 
 - Kernel registry is static (Docker `gcc-ubuntu24-docker` and `gcc-ubuntu24-docker-net`).
 - Runtime selection follows resolved kernel plus optional per-package user preference.
 - Package library management covers list/detail/open/delete; bulk cleanup and save-linked cleanup are not implemented.
-- Panel declarations name primitives (`tutorial` / `editor` / `terminal` / `web-preview` / `file-tree` / `test-results`). Package `default_panels` is the default; a step `panels` overlay replaces it for that step. The player auto-layouts; packages cannot set geometry. Preview sits beside the editor when needed. Logs and diagnostics are a host drawer. The file-tree is an editor accessory with no FILES header. Learner-visible copy lives in `public/js/messages.js` (`t('group.key')`); static HTML uses `data-i18n*` filled by `applyStaticCopy()`. Tutorial Markdown is rendered by `public/js/content-renderer.js` (copyable fences, package-relative images, sanitized HTML). Progress UI reads `save.json` metadata from step APIs. Trust changes use a confirmation dialog. Frontend logic lives in `public/js/` ES modules without a bundler. Background long-running preview processes remain open; further live-web work is deprioritized in favor of HTML preview. There is no Settings view yet.
+- Panel declarations name primitives (`tutorial` / `editor` / `terminal` / `web-preview` / `file-tree` / `test-results`). Package `default_panels` is the default; a step `panels` overlay replaces it for that step. The player auto-layouts; packages cannot set geometry. Preview sits beside the whole editor column when needed. Logs and diagnostics are a host drawer. The file-tree sits on the right of Monaco, not the far right of the page. Learner-visible copy lives in `public/js/messages.js` (`t('group.key')`); static HTML uses `data-i18n*` filled by `applyStaticCopy()`. Tutorial Markdown is rendered by `public/js/content-renderer.js` (copyable fences, package-relative images, sanitized HTML). Progress UI reads `save.json` metadata from step APIs. Trust changes use a confirmation dialog. Frontend logic lives in `public/js/` ES modules without a bundler. Background long-running preview processes remain open; further live-web work is deprioritized in favor of HTML preview. There is no Settings view yet.
 - The Docker container is single-session and intended for local single-user use.
