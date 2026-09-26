@@ -103,7 +103,7 @@ For test commands, relative paths are acceptable because tests execute with cwd:
 /home/student/workspace
 ```
 
-Put compiled binaries and other temp files under `/tmp` so they stay out of the workspace file tree and step archive. The player also uploads command scripts to `/tmp/<step>.<cmd>.sh`; never mention that path in `instructions.md`. If a step tells the learner to run gdb on the run product, the path in the Markdown must match `run.sh` (hello-c uses `gdb /tmp/a.out`). Compiling to `./a.out` in the workspace is allowed, but the binary will show in the file tree and be saved (the completeness hash still ignores `a.out`).
+Put compiled binaries where the lesson needs them: `/tmp` or `build/` to keep the workspace about source, or into the workspace when students should see `.o` / binaries. The player does not globally hide `*.o`. The player also uploads command scripts to `/tmp/<step>.<cmd>.sh`; never mention that path in `instructions.md`. If a step tells the learner to run gdb on the run product, the path in the Markdown must match `run.sh` (hello-c uses `gdb /tmp/a.out`). The completeness hash still ignores rebuildable junk such as `a.out`.
 
 ## Authoring Rules
 

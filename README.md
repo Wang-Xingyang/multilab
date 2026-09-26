@@ -1,10 +1,12 @@
 # MultiLab
 
-MultiLab is a local-first interactive tutorial player for programming labs.
+MultiLab is a step-by-step hands-on tutorial player.
 
-It runs tutorial packages that declare a `multilab.json` manifest, provide real Markdown/code/script files, and execute commands inside a kernel/runtime. The current official runtime is a Docker container for OS/C labs. Tutorials can also be packed as `.mlab` archives and imported into a local package library.
+The player is the product. The student brings the lab (this computer, WSL, VirtualBox, cloud, or their own container). Tutorial packages use `multilab.json`. Browser ↔ player is HTTP/WebSocket. Player ↔ lab is SSH or local spawn. The coverage/test package is `tutorials/hello-c/`.
 
 ## Current Status
+
+Live code is still the Docker-container prototype. Target connection and BYOE rules are in `MULTILAB_PRODUCT_ARCHITECTURE_SPEC.md` §0 (2026-09-25). New work should not deepen bind-mount as the architecture.
 
 This repository is an early prototype of the MultiLab host:
 
@@ -24,7 +26,7 @@ This repository is an early prototype of the MultiLab host:
 The long-term product direction is documented in:
 
 ```text
-../MULTILAB_PRODUCT_ARCHITECTURE_SPEC.md
+MULTILAB_PRODUCT_ARCHITECTURE_SPEC.md
 ```
 
 ## Repository Layout
@@ -199,7 +201,7 @@ python3 docs/tutorial-skill/scripts/unpack_mlab.py /tmp/hello-c.mlab -o /tmp/hel
 - `docs/architecture.md`: current host/runtime/package architecture.
 - `docs/tutorial-authoring.md`: how to write `multilab.json` tutorials.
 - `docs/tutorial-skill/`: guidance and assets for AI-generated tutorials.
-- `../MULTILAB_PRODUCT_ARCHITECTURE_SPEC.md`: product-level target architecture.
+- `MULTILAB_PRODUCT_ARCHITECTURE_SPEC.md`: product-level target architecture (§0 is the 2026-09-25 BYOE direction).
 
 ## Development Notes
 

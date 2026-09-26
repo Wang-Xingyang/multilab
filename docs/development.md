@@ -15,6 +15,10 @@ The three child directories are separate git repositories.
 
 ## Local Setup
 
+`TUTORIALS_DIR` must point at `../../tutorials` so the catalog is `hello-c` (the player test package). Do not point it at `os-deep-dive` while working on the player.
+
+The Docker image below is the **current prototype** lab. The target is a student-provided machine (start with this WSL via local spawn; SSH later). Do not add player features that only work on bind-mount.
+
 Build the runtime image:
 
 ```bash

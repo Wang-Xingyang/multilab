@@ -1,12 +1,16 @@
 # Architecture
 
-This document describes the current MultiLab prototype after the `multilab.json` migration.
+This document describes the **live Docker prototype** after the `multilab.json` migration.
 
-For the full target product architecture, see:
+Target product (2026-09-25): the player connects to a student-provided lab over SSH or local spawn. Do not add features that deepen Docker bind-mount as the architecture. See:
 
 ```text
-../../MULTILAB_PRODUCT_ARCHITECTURE_SPEC.md
+../MULTILAB_PRODUCT_ARCHITECTURE_SPEC.md   # §0 direction update
+../../.ai/AGENTS.md
+../../.ai/memory/MEMORY.md
 ```
+
+The test / coverage tutorial is `tutorials/hello-c/` (`TUTORIALS_DIR=../../tutorials` from `multilab/server/`).
 
 ## Product Shape
 
@@ -28,7 +32,7 @@ Host save is the source of truth. The lab only holds the current step:
 
 Save, run, step switch, exit, and export all flush the live workspace back into the host save for that step, then pack `.mlab-save` from the host save. `.mlab` is the tutorial; `.mlab-save` is progress.
 
-The current code is still a compact prototype, but new work should follow this direction.
+The current code is still this Docker prototype. New work should follow the 2026-09-25 SSH/local lab direction, not extend bind-mount as the product path.
 
 ## Runtime Layers
 

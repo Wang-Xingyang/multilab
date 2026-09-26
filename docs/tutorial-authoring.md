@@ -4,6 +4,12 @@ MultiLab tutorials are authored as directories and must contain a `multilab.json
 
 There is no supported `tutorial.json` format.
 
+The player does not ship a lab image. `runtime_requirements` are a checklist the player probes after the student connects a machine (this computer, WSL, VirtualBox, cloud). Put the tools you need in that list; do not assume `gcc-ubuntu24-docker`.
+
+Build artifacts are a teaching choice. Compile into the workspace when students should see `.o` / binaries (make/gcc lessons). Write to `/tmp` or `build/` when they should not. The player does not globally hide `*.o`. Say so in `instructions.md` and do the same in `run.sh` / `Makefile`.
+
+The coverage package used to test the player is `tutorials/hello-c/`.
+
 ## Directory Structure
 
 ```text
@@ -250,8 +256,8 @@ A lecture step can declare `"panels": ["tutorial", "web-preview"]` so the editor
 - Keep editable starter files in `files/`.
 - Keep command scripts as real files referenced by manifest commands.
 - Do not inline instructions, source files, or scripts into the manifest.
-- Use `/home/student/workspace/<file>` in interactive run scripts.
-- Put build artifacts in `/tmp`, not in the workspace. Do not mention player script paths (`/tmp/<step>.<cmd>.sh`) in instructions. If learners must type `gdb` on the run binary, that path must match `run.sh`.
+- Use `/home/student/workspace/<file>` in interactive run scripts (live Docker prototype; BYOE labs will use the connected workspace root).
+- Put build artifacts where this lesson wants them (`/tmp`, `build/`, or the workspace). Do not mention player script paths (`/tmp/<step>.<cmd>.sh`) in instructions. If learners must type `gdb` on the run product, that path must match `run.sh`.
 - Keep each step focused on one concept.
 - Add TODO markers where the learner should edit.
 - Prefer semantic ids such as `01-first-program`.
