@@ -49,6 +49,11 @@ export class WorkspaceService {
     this.attachedHostPath = null;
   }
 
+  /** Drop the live-host pointer without flushing. Used before a kernel switch. */
+  forgetLiveHost() {
+    this.attachedHostPath = null;
+  }
+
   describe() {
     const base = resolveWorkspaceStrategy({
       provider: this.#providerForActiveKernel(),

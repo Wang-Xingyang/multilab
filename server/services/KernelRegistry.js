@@ -1,3 +1,6 @@
+export const LOCAL_KERNEL_ID = 'this-computer';
+export const SSH_KERNEL_ID = 'ssh-remote';
+
 export class KernelRegistry {
   constructor({ kernels }) {
     this.kernels = kernels;
@@ -86,6 +89,22 @@ export function createDefaultKernelRegistry({ image, workspaceDir }) {
         id: 'this-computer',
         display_name: 'This computer',
         provider: 'local',
+        user_owned: true,
+        workspace: workspaceDir,
+        platform: 'linux',
+        capabilities: ['tty', 'compile', 'debug', 'signals'],
+        commands: {
+          gcc: true,
+          gdb: true,
+          bash: true,
+          make: true,
+        },
+        network_default: 'none',
+      },
+      {
+        id: SSH_KERNEL_ID,
+        display_name: 'SSH remote',
+        provider: 'ssh',
         user_owned: true,
         workspace: workspaceDir,
         platform: 'linux',

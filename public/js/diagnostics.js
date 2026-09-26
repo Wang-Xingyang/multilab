@@ -1,6 +1,11 @@
-import { escapeAttr } from './ui.js';
+import { escapeAttr, toast, status } from './ui.js';
 import { t } from './messages.js';
-import { apiGet } from './api.js';
+import { apiGet, apiJson } from './api.js';
+import { handleError } from './errors.js';
+import { currentTutorialKey } from './state.js';
+import { reconnectWS } from './terminal.js';
+import { refreshKernelResolution, renderKernelSelect } from './kernel.js';
+import { refreshFileTree } from './file-tree.js';
 
 function kv(rows) {
   return `<div class="diag-kv">${rows.map(([k, v]) =>
@@ -8,15 +13,139 @@ function kv(rows) {
   ).join('')}</div>`;
 }
 
+function field({ id, label, type = 'text', value = '', placeholder = '', autocomplete = 'off' }) {
+  return `<label class="diag-field">
+    <span>${escapeAttr(label)}</span>
+    <input id="${escapeAttr(id)}" type="${escapeAttr(type)}" value="${escapeAttr(value)}"
+      placeholder="${escapeAttr(placeholder)}" autocomplete="${escapeAttr(autocomplete)}">
+  </label>`;
+}
+
+function renderSshForm(connection = {}) {
+  const connected = Boolean(connection.connected || connection.ready);
+  const statusLabel = connected ? t('lab.statusOn') : t('lab.statusOff');
+  return `
+    <div class="diag-block" id="diag-ssh">
+      <h4>${escapeAttr(t('lab.title'))}</h4>
+      <p class="diag-note">${escapeAttr(statusLabel)}${connection.error ? ` — ${escapeAttr(connection.error)}` : ''}</p>
+      <form class="diag-form" id="ssh-form">
+        ${field({ id: 'ssh-host', label: t('lab.host'), value: connection.host || '', placeholder: '192.168.1.10' })}
+        ${field({ id: 'ssh-port', label: t('lab.port'), type: 'number', value: String(connection.port || 22) })}
+        ${field({ id: 'ssh-user', label: t('lab.username'), value: connection.username || '', placeholder: 'student' })}
+        ${field({
+          id: 'ssh-key',
+          label: t('lab.privateKey'),
+          value: connection.privateKeyPath || '',
+          placeholder: t('lab.keyPlaceholder'),
+        })}
+        ${field({
+          id: 'ssh-password',
+          label: t('lab.password'),
+          type: 'password',
+          placeholder: t('lab.passwordHint'),
+          autocomplete: 'new-password',
+        })}
+        <label class="diag-check">
+          <input id="ssh-agent" type="checkbox" ${connection.useAgent !== false ? 'checked' : ''}>
+          <span>${escapeAttr(t('lab.useAgent'))}</span>
+        </label>
+        <div class="diag-actions">
+          <button type="submit" class="hdr-btn primary" id="ssh-connect">${escapeAttr(t('lab.connect'))}</button>
+          <button type="button" class="hdr-btn ghost" id="ssh-disconnect">${escapeAttr(t('lab.disconnect'))}</button>
+          <button type="button" class="hdr-btn ghost" id="ssh-local">${escapeAttr(t('lab.useLocal'))}</button>
+        </div>
+      </form>
+    </div>
+  `;
+}
+
+function bindSshForm(tutorialKey) {
+  const form = document.getElementById('ssh-form');
+  if (!form) return;
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await connectSsh(tutorialKey);
+  });
+  document.getElementById('ssh-disconnect')?.addEventListener('click', () => disconnectSsh(tutorialKey));
+  document.getElementById('ssh-local')?.addEventListener('click', () => disconnectSsh(tutorialKey));
+}
+
+function sshFormPayload() {
+  const password = document.getElementById('ssh-password')?.value || '';
+  const payload = {
+    host: document.getElementById('ssh-host')?.value || '',
+    port: Number(document.getElementById('ssh-port')?.value || 22),
+    username: document.getElementById('ssh-user')?.value || '',
+    privateKeyPath: document.getElementById('ssh-key')?.value || '',
+    useAgent: Boolean(document.getElementById('ssh-agent')?.checked),
+  };
+  if (password) payload.password = password;
+  return payload;
+}
+
+async function connectSsh(tutorialKey) {
+  try {
+    status(t('lab.connecting'));
+    const result = await apiJson('/api/lab/connect', {
+      ...sshFormPayload(),
+      tutorial: tutorialKey || undefined,
+    });
+    if (result.kernel) {
+      renderKernelSelect({
+        selected: result.kernel,
+        runtime: result.runtime,
+        preferred_applied: true,
+      });
+    }
+    reconnectWS({ reason: 'ssh-remote' });
+    refreshFileTree(false);
+    const conn = result.connection || {};
+    toast(t('lab.connected', { user: conn.username || '', host: conn.host || '' }));
+    await refreshDiagnosticsPane(tutorialKey);
+  } catch (e) {
+    handleError(e, {
+      feature: 'lab',
+      message: t('lab.connectFailed', { error: e.message }),
+      notify: true,
+    });
+  }
+}
+
+async function disconnectSsh(tutorialKey) {
+  try {
+    status(t('lab.disconnecting'));
+    const result = await apiJson('/api/lab/disconnect', {
+      tutorial: tutorialKey || undefined,
+    });
+    await refreshKernelResolution();
+    reconnectWS({ reason: 'this-computer' });
+    refreshFileTree(false);
+    toast(t('lab.disconnected'));
+    await refreshDiagnosticsPane(tutorialKey);
+    return result;
+  } catch (e) {
+    handleError(e, {
+      feature: 'lab',
+      message: t('lab.disconnectFailed', { error: e.message }),
+      notify: true,
+    });
+  }
+}
+
 export async function refreshDiagnosticsPane(tutorialKey) {
   const pane = document.getElementById('pane-diagnostics');
   if (!pane) return;
-  if (!tutorialKey) {
-    pane.innerHTML = `<div class="aux-empty"><span>${t('diagnostics.openTutorial')}</span></div>`;
-    return;
-  }
   pane.innerHTML = `<div class="aux-empty"><span>${t('panels.diagnosticsLoading')}</span></div>`;
   try {
+    const connection = tutorialKey
+      ? null
+      : await apiGet('/api/lab/connection');
+    if (!tutorialKey) {
+      pane.innerHTML = `${renderSshForm(connection)}
+        <div class="aux-empty"><span>${t('diagnostics.openTutorial')}</span></div>`;
+      bindSshForm(null);
+      return;
+    }
     const data = await apiGet(`/api/diagnostics?tutorial=${encodeURIComponent(tutorialKey)}`);
     const selected = data.resolution?.selected;
     const candidates = (data.resolution?.candidates || [])
@@ -24,6 +153,7 @@ export async function refreshDiagnosticsPane(tutorialKey) {
       .slice(0, 8);
     const missing = (selected && data.resolution?.candidates?.find(c => c.id === selected.id)) || {};
     pane.innerHTML = `
+      ${renderSshForm(data.connection || {})}
       <div class="diag-block">
         <h4>Package</h4>
         ${kv([
@@ -77,6 +207,7 @@ export async function refreshDiagnosticsPane(tutorialKey) {
         ])}
       </div>
     `;
+    bindSshForm(tutorialKey);
   } catch (e) {
     pane.innerHTML = `<div class="aux-empty" style="color:var(--error)">${escapeAttr(e.message)}</div>`;
   }

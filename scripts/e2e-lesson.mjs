@@ -140,8 +140,16 @@ await test('diagnostics aggregates kernel/trust/runtime for hello-c', async () =
   const { body } = await api('/api/diagnostics?tutorial=hello-c');
   assert.equal(body.resolution.selected.id, 'this-computer');
   assert.equal(body.trust.trust, 'untrusted');
-  assert.ok(body.runtime.image);
-  assert.equal(body.runtime.probe?.ok, true, `probe should find the OS image, got ${JSON.stringify(body.runtime.probe)}`);
+  assert.ok(body.runtime.probe?.ok, `probe should succeed, got ${JSON.stringify(body.runtime.probe)}`);
+  assert.equal(body.connection?.connected, false);
+});
+
+await test('lab connection API is unconfigured by default', async () => {
+  const { ok, body } = await api('/api/lab/connection');
+  assert.equal(ok, true);
+  assert.equal(body.connected, false);
+  assert.equal(typeof body.host, 'string');
+  assert.equal(body.has_password, false);
 });
 
 // --- D. package library: pack -> upload -> list -> open -> delete ---

@@ -14,7 +14,7 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 
 import { normalizePanels, resolveStepPanels, FALLBACK_PANELS } from '../server/services/PanelModel.js';
-import { createDefaultKernelRegistry, packageNeedsNetwork } from '../server/services/KernelRegistry.js';
+import { createDefaultKernelRegistry, packageNeedsNetwork, SSH_KERNEL_ID } from '../server/services/KernelRegistry.js';
 import { PackageService, validateWorkspaceRelPath, contentAssetResponseHeaders, stepAllowsReadOnlyCommand } from '../server/services/PackageService.js';
 import { SaveService } from '../server/services/SaveService.js';
 import {
@@ -40,6 +40,7 @@ import {
 } from '../server/workspace/HostWorkspace.js';
 import { RuntimeProvider, RuntimeSession } from '../server/runtime/RuntimeProvider.js';
 import { LocalRuntimeProvider } from '../server/runtime/LocalRuntimeProvider.js';
+import { SshRuntimeProvider } from '../server/runtime/SshRuntimeProvider.js';
 import { RuntimeManager } from '../server/runtime/RuntimeManager.js';
 import {
   capturedTimeoutMs,
@@ -59,6 +60,7 @@ import {
 import { localRcFileContents } from '../server/runtime/localShellEnv.js';
 import { MlabSaveArchiveService } from '../server/services/MlabSaveArchiveService.js';
 import { KernelSelectionStore } from '../server/services/KernelSelectionStore.js';
+import { SshConnectionStore } from '../server/services/SshConnectionStore.js';
 import { sanitizeUploadFilename } from '../server/services/TempArchiveUpload.js';
 import { SecurityPolicyService } from '../server/services/SecurityPolicyService.js';
 import { TrustStore } from '../server/services/TrustStore.js';
@@ -306,8 +308,10 @@ await test('KernelRegistry preferred kernel selection', () => {
   assert.equal(missing.preferred_applied, false);
   assert.equal(missing.selected.id, 'gcc-ubuntu24-docker');
   const ids = registry.listKernels().map(kernel => kernel.id).sort();
-  assert.deepEqual(ids, ['gcc-ubuntu24-docker', 'gcc-ubuntu24-docker-net', 'this-computer']);
+  assert.deepEqual(ids, ['gcc-ubuntu24-docker', 'gcc-ubuntu24-docker-net', 'ssh-remote', 'this-computer']);
   assert.equal(registry.listKernels().find(k => k.id === 'this-computer').provider, 'local');
+  assert.equal(registry.listKernels().find(k => k.id === SSH_KERNEL_ID).provider, 'ssh');
+  assert.equal(registry.listKernels().find(k => k.id === SSH_KERNEL_ID).user_owned, true);
   const resolved = registry.resolveForPackage(pkg);
   assert.equal(resolved.selected.id, 'gcc-ubuntu24-docker');
 });
@@ -602,6 +606,8 @@ await test('PreviewPortMap rewrites container URLs via host map', () => {
 await test('Frontend messages catalog resolves keys', () => {
   assert.equal(t('trust.trusted'), '已信任');
   assert.equal(t('kernel.switched', { id: 'gcc' }), '已切换到 gcc');
+  assert.equal(t('lab.title'), '远程实验机 (SSH)');
+  assert.equal(t('lab.connected', { user: 'u', host: 'h' }), '已连接 u@h');
   assert.equal(t('chrome.theme'), '切换主题');
   assert.ok(Object.keys(getCatalog().commands).length >= 5);
   assert.ok(Object.keys(getCatalog().chrome).length >= 5);
@@ -665,6 +671,35 @@ await test('LocalRuntimeProvider points workspace and execs on this computer', a
     const uploaded = await fs.readFile(scriptPath, 'utf8');
     assert.equal(uploaded.includes('/home/student/workspace'), false);
     assert.equal(uploaded.includes(link), true);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('SshConnectionStore never persists password and probe stays unconfigured', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-ssh-'));
+  try {
+    const store = new SshConnectionStore({ runtimeStateDir: tmp });
+    await store.write({
+      host: 'lab.example',
+      username: 'student',
+      port: 22,
+      privateKeyPath: '~/.ssh/id_ed25519',
+      password: 'secret',
+    });
+    const raw = JSON.parse(await fs.readFile(path.join(tmp, 'ssh-connection.json'), 'utf8'));
+    assert.equal(raw.password, undefined);
+    assert.equal(raw.host, 'lab.example');
+    assert.equal(raw.username, 'student');
+    const provider = new SshRuntimeProvider({ connectionStore: store });
+    const unconfigured = new SshRuntimeProvider();
+    const probe = await unconfigured.probe();
+    assert.equal(probe.ok, false);
+    assert.equal(probe.implemented, true);
+    assert.equal(probe.reason, 'ssh-unconfigured');
+    assert.equal(provider.workspaceStrategy({ workspace: '/home/student/workspace' }).kind, 'copy');
+    const plan = provider.planKernelSession({ id: SSH_KERNEL_ID, workspace: '/home/student/workspace' });
+    assert.equal(plan.workspaceStrategy.reason, 'ssh');
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

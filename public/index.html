@@ -543,6 +543,16 @@
   .diag-kv .v { color: var(--text); word-break: break-all; }
   .diag-list { margin: 6px 0 0; padding-left: 16px; color: var(--text-dim); font-size: 11px; }
   .diag-list li { margin: 2px 0; }
+  .diag-note { font-size: 11px; color: var(--text-dim); margin: 0 0 8px; }
+  .diag-form { display: flex; flex-direction: column; gap: 8px; }
+  .diag-field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-dim); }
+  .diag-field input {
+    height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--bg); color: var(--text); font-family: var(--font-mono); font-size: 12px;
+  }
+  .diag-field input:focus { outline: none; border-color: var(--accent); }
+  .diag-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); }
+  .diag-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 
   /* logs */
   .log-line {

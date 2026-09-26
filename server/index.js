@@ -15,14 +15,16 @@ import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { DockerRuntimeProvider } from './runtime/DockerRuntimeProvider.js';
 import { LocalRuntimeProvider } from './runtime/LocalRuntimeProvider.js';
+import { SshRuntimeProvider } from './runtime/SshRuntimeProvider.js';
 import { RuntimeManager } from './runtime/RuntimeManager.js';
 import { PackageService, contentAssetResponseHeaders } from './services/PackageService.js';
 import { SaveService } from './services/SaveService.js';
 import { WorkspaceService } from './services/WorkspaceService.js';
 import { CommandService } from './services/CommandService.js';
 import { TrustStore } from './services/TrustStore.js';
-import { createDefaultKernelRegistry } from './services/KernelRegistry.js';
+import { createDefaultKernelRegistry, LOCAL_KERNEL_ID, SSH_KERNEL_ID } from './services/KernelRegistry.js';
 import { KernelSelectionStore } from './services/KernelSelectionStore.js';
+import { SshConnectionStore } from './services/SshConnectionStore.js';
 import { MlabArchiveService } from './services/MlabArchiveService.js';
 import { MlabSaveArchiveService } from './services/MlabSaveArchiveService.js';
 import { PackageLibrary } from './services/PackageLibrary.js';
@@ -62,6 +64,11 @@ const dockerRuntimeProvider = new DockerRuntimeProvider({
   workspaceDir: WORKSPACE_DIR,
   hostSavesDir: HOST_SAVES_DIR,
 });
+const sshConnectionStore = new SshConnectionStore({ runtimeStateDir: RUNTIME_STATE_DIR });
+const sshRuntimeProvider = new SshRuntimeProvider({
+  workspaceDir: WORKSPACE_DIR,
+  connectionStore: sshConnectionStore,
+});
 const archiveService = new MlabArchiveService();
 const packageLibrary = new PackageLibrary({
   libraryDir: PACKAGE_LIBRARY_DIR,
@@ -80,6 +87,7 @@ const runtimeManager = new RuntimeManager({
   providers: {
     local: localRuntimeProvider,
     docker: dockerRuntimeProvider,
+    ssh: sshRuntimeProvider,
   },
   kernelRegistry,
   packageService,
@@ -111,6 +119,40 @@ const commandService = new CommandService({
 
 function getRuntimeSession() {
   return runtimeManager.getSession();
+}
+
+function connectionFromBody(body = {}) {
+  const out = {};
+  for (const key of ['host', 'port', 'username', 'privateKeyPath', 'useAgent']) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) out[key] = body[key];
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'password')) out.password = body.password;
+  return out;
+}
+
+async function switchKernelPreservingSaves(tutorial, kernelId) {
+  await workspaceService.flushLiveToHost();
+  workspaceService.forgetLiveHost();
+  const selected = await runtimeManager.selectKernelForTutorial(tutorial, kernelId);
+  const cfg = await packageService.loadTutorial(tutorial);
+  const progress = await saveService.getProgress(cfg);
+  if (progress.current_step) {
+    await saveService.loadStepState(tutorial, progress.current_step);
+  }
+  return selected;
+}
+
+function runtimeSelectPayload(selected) {
+  const plan = selected.plan || runtimeManager.describePlan(selected.kernel);
+  return {
+    provider: selected.kernel.provider,
+    network_mode: plan?.networkMode || null,
+    sandbox_preset: plan?.sandboxPreset || null,
+    publish_ports: plan?.publishPorts || [],
+    image: plan?.image || selected.kernel.image || null,
+    active: true,
+    active_kernel_id: selected.kernel.id,
+  };
 }
 
 // ---------- 1. Express ----------
@@ -215,6 +257,7 @@ app.get('/api/diagnostics', async (req, res) => {
         probe,
         workspace: workspaceService.describe(),
       },
+      connection: sshRuntimeProvider.describeConnection(),
     });
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message });
@@ -271,27 +314,78 @@ app.post('/api/runtime/select', async (req, res) => {
     if (!tutorial || !kernelId) {
       return res.status(400).json({ error: 'tutorial and kernel_id required' });
     }
-    const selected = await runtimeManager.selectKernelForTutorial(tutorial, kernelId);
-    const plan = selected.plan || runtimeManager.describePlan(selected.kernel);
+    const selected = await switchKernelPreservingSaves(tutorial, kernelId);
     res.json({
       tutorial,
       package_digest: selected.package_digest,
       kernel: selected.kernel,
       replaced: selected.replaced,
       preferred_applied: selected.resolution.preferred_applied,
-      runtime: {
-        provider: selected.kernel.provider,
-        network_mode: plan?.networkMode || null,
-        sandbox_preset: plan?.sandboxPreset || null,
-        publish_ports: plan?.publishPorts || [],
-        image: plan?.image || selected.kernel.image || null,
-        active: true,
-        active_kernel_id: selected.kernel.id,
-      },
+      runtime: runtimeSelectPayload(selected),
       candidates: selected.resolution.candidates,
     });
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message, code: e.code });
+  }
+});
+
+app.get('/api/lab/connection', async (req, res) => {
+  try {
+    await sshRuntimeProvider.loadSavedConnection();
+    res.json(sshRuntimeProvider.describeConnection());
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message, code: e.code });
+  }
+});
+
+app.post('/api/lab/connection', async (req, res) => {
+  try {
+    const connection = await sshRuntimeProvider.applyConnection(connectionFromBody(req.body));
+    res.json(connection);
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message, code: e.code });
+  }
+});
+
+app.post('/api/lab/connect', async (req, res) => {
+  try {
+    const { tutorial } = req.body || {};
+    await sshRuntimeProvider.applyConnection(connectionFromBody(req.body));
+    await sshRuntimeProvider.session.ensure();
+    let selected = null;
+    if (tutorial) {
+      selected = await switchKernelPreservingSaves(tutorial, SSH_KERNEL_ID);
+    }
+    res.json({
+      connection: sshRuntimeProvider.describeConnection(),
+      kernel: selected?.kernel || null,
+      replaced: Boolean(selected?.replaced),
+      runtime: selected ? runtimeSelectPayload(selected) : null,
+    });
+  } catch (e) {
+    res.status(e.statusCode || 502).json({ error: e.message, code: e.code || 'ssh_failed' });
+  }
+});
+
+app.post('/api/lab/disconnect', async (req, res) => {
+  try {
+    const { tutorial } = req.body || {};
+    const active = runtimeManager.getActiveKernel();
+    if (tutorial && active?.id === SSH_KERNEL_ID) {
+      await switchKernelPreservingSaves(tutorial, LOCAL_KERNEL_ID);
+    } else if (!tutorial && active?.id === SSH_KERNEL_ID) {
+      await workspaceService.flushLiveToHost();
+      workspaceService.forgetLiveHost();
+      const local = kernelRegistry.listKernels().find(kernel => kernel.id === LOCAL_KERNEL_ID);
+      if (local) await runtimeManager.ensureForKernel(local);
+    }
+    const connection = await sshRuntimeProvider.disconnect();
+    res.json({
+      connection,
+      kernel: runtimeManager.getActiveKernel(),
+    });
+  } catch (e) {
+    res.status(e.statusCode || 502).json({ error: e.message, code: e.code || 'ssh_failed' });
   }
 });
 
@@ -696,7 +790,8 @@ wss.on('connection', (ws) => {
 });
 
 // ---------- 4. 启动 ----------
-runtimeManager.ensureDefaultSession()
+sshRuntimeProvider.loadSavedConnection()
+  .then(() => runtimeManager.ensureDefaultSession())
   .then(ensured => {
     server.listen(PORT, () => {
       const kernel = ensured.kernel;
@@ -705,6 +800,9 @@ runtimeManager.ensureDefaultSession()
       if (kernel.provider === 'docker') {
         console.log(`  Container: ${CONTAINER_NAME} (${kernel.image || EXEC_IMAGE})`);
         console.log(`  Network: ${ensured.plan?.networkMode || 'n/a'}  Sandbox: ${ensured.plan?.sandboxPreset || 'n/a'}`);
+      } else if (kernel.provider === 'ssh') {
+        const conn = sshRuntimeProvider.describeConnection();
+        console.log(`  Lab: ssh ${conn.username}@${conn.host}:${conn.port}`);
       } else {
         console.log(`  Lab: this computer`);
       }
