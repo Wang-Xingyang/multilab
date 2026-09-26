@@ -3,7 +3,7 @@
 //   1. 静态服务前端 (public/)
 //   2. 提供 /api/tutorials 列表 + 详情
 //   3. 通过 WebSocket 把终端接到 RuntimeSession.attachTerminal
-//      （实验机是 Docker exec TTY；播放器是 Windows/Linux 上的 Node）
+//      （默认实验机是本机；Docker 仍是可选 provider）
 
 import 'dotenv/config';
 import express from 'express';
@@ -14,6 +14,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { DockerRuntimeProvider } from './runtime/DockerRuntimeProvider.js';
+import { LocalRuntimeProvider } from './runtime/LocalRuntimeProvider.js';
 import { RuntimeManager } from './runtime/RuntimeManager.js';
 import { PackageService, contentAssetResponseHeaders } from './services/PackageService.js';
 import { SaveService } from './services/SaveService.js';
@@ -51,6 +52,10 @@ const HOST_SAVES_DIR = process.env.HOST_SAVES_DIR
   ? path.resolve(__dirname, process.env.HOST_SAVES_DIR)
   : path.join(RUNTIME_STATE_DIR, 'saves');
 
+const localRuntimeProvider = new LocalRuntimeProvider({
+  workspaceDir: WORKSPACE_DIR,
+  hostSavesDir: HOST_SAVES_DIR,
+});
 const dockerRuntimeProvider = new DockerRuntimeProvider({
   image: EXEC_IMAGE,
   containerName: CONTAINER_NAME,
@@ -72,7 +77,10 @@ const kernelRegistry = createDefaultKernelRegistry({
 });
 const kernelSelectionStore = new KernelSelectionStore({ runtimeStateDir: RUNTIME_STATE_DIR });
 const runtimeManager = new RuntimeManager({
-  providers: { docker: dockerRuntimeProvider },
+  providers: {
+    local: localRuntimeProvider,
+    docker: dockerRuntimeProvider,
+  },
   kernelRegistry,
   packageService,
   kernelSelectionStore,
@@ -694,17 +702,21 @@ runtimeManager.ensureDefaultSession()
       const kernel = ensured.kernel;
       console.log(`\n  MultiLab running at  http://localhost:${PORT}\n`);
       console.log(`  Kernel: ${kernel.id} (${kernel.provider})`);
-      console.log(`  Container: ${CONTAINER_NAME} (${kernel.image || EXEC_IMAGE})`);
-      console.log(`  Network: ${ensured.plan?.networkMode || 'n/a'}  Sandbox: ${ensured.plan?.sandboxPreset || 'n/a'}`);
+      if (kernel.provider === 'docker') {
+        console.log(`  Container: ${CONTAINER_NAME} (${kernel.image || EXEC_IMAGE})`);
+        console.log(`  Network: ${ensured.plan?.networkMode || 'n/a'}  Sandbox: ${ensured.plan?.sandboxPreset || 'n/a'}`);
+      } else {
+        console.log(`  Lab: this computer`);
+      }
       const workspace = ensured.plan?.workspaceStrategy || workspaceService.describe();
       console.log(`  Workspace: ${workspace.kind}${workspace.hostPath ? ` → ${workspace.hostPath}` : ''}`);
-      console.log(`  Stop with Ctrl+C — container 会保留,策略变化时按 kernel 重建\n`);
+      console.log(`  Stop with Ctrl+C\n`);
     });
   })
   .catch(e => {
     console.error('\n❌ 启动失败:\n');
     console.error(e.message);
-    if (/未构建|No such image|not found/i.test(e.message || '')) {
+    if (/未构建|No such image|not found/i.test(e.message || '') && /docker|镜像/i.test(e.message || '')) {
       console.error('\n请先构建执行镜像:');
       console.error(`  docker build -t ${EXEC_IMAGE} -f docker/os.Dockerfile docker/\n`);
     }

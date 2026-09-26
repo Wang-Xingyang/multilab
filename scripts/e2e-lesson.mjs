@@ -123,7 +123,7 @@ await test('step reset restores template files', async () => {
 // --- C. kernel + trust + diagnostics ---
 await test('kernel resolve picks offline gcc kernel for hello-c', async () => {
   const { body } = await api('/api/kernels/resolve?tutorial=hello-c');
-  assert.equal(body.selected.id, 'gcc-ubuntu24-docker');
+  assert.equal(body.selected.id, 'this-computer');
   assert.equal(body.selected.network_default, 'none');
 });
 
@@ -138,7 +138,7 @@ await test('trust toggles untrusted -> user-trusted -> untrusted', async () => {
 
 await test('diagnostics aggregates kernel/trust/runtime for hello-c', async () => {
   const { body } = await api('/api/diagnostics?tutorial=hello-c');
-  assert.equal(body.resolution.selected.id, 'gcc-ubuntu24-docker');
+  assert.equal(body.resolution.selected.id, 'this-computer');
   assert.equal(body.trust.trust, 'untrusted');
   assert.ok(body.runtime.image);
   assert.equal(body.runtime.probe?.ok, true, `probe should find the OS image, got ${JSON.stringify(body.runtime.probe)}`);

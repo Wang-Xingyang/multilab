@@ -32,7 +32,8 @@ export class SecurityPolicyService {
     }
 
     const security = pkg.security || {};
-    const sandboxRequired = security.sandbox_required === true || trust.trust === 'untrusted';
+    const userOwned = Boolean(selectedKernel.user_owned);
+    const sandboxRequired = !userOwned && (security.sandbox_required === true || trust.trust === 'untrusted');
     if (sandboxRequired && !(selectedKernel.capabilities || []).includes('sandbox')) {
       throw Object.assign(
         new Error('Package requires a sandbox-capable kernel before commands can run'),
@@ -41,13 +42,13 @@ export class SecurityPolicyService {
     }
 
     const networkRequired = packageNeedsNetwork(pkg);
-    if (!networkRequired && selectedKernel.network_default !== 'none') {
+    if (!userOwned && !networkRequired && selectedKernel.network_default !== 'none') {
       throw Object.assign(
         new Error('Package requires network-disabled execution before commands can run'),
         { statusCode: 403 }
       );
     }
-    if (networkRequired && selectedKernel.network_default === 'none') {
+    if (!userOwned && networkRequired && selectedKernel.network_default === 'none') {
       throw Object.assign(
         new Error('Package requires network or preview ports, but the selected kernel does not allow it'),
         { statusCode: 409 }

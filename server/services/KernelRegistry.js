@@ -12,10 +12,11 @@ export class KernelRegistry {
     const networkRequired = packageNeedsNetwork(pkg);
     const candidates = this.kernels
       .map(kernel => {
-        const match = kernelMatchesRequirements(kernel, requirements);
-        const networkOk = networkRequired
-          ? kernel.network_default !== 'none'
-          : kernel.network_default === 'none';
+        const match = kernelMatchesRequirements(kernel, requirements, { userOwned: kernel.user_owned });
+        const networkOk = kernel.user_owned
+          || (networkRequired
+            ? kernel.network_default !== 'none'
+            : kernel.network_default === 'none');
         const unimplemented = kernel.implemented === false;
         return {
           kernel,
@@ -26,7 +27,7 @@ export class KernelRegistry {
           compatible: match.ok && networkOk && !unimplemented,
         };
       })
-      .sort((a, b) => Number(b.recommended) - Number(a.recommended));
+      .sort((a, b) => Number(b.recommended) - Number(a.recommended) || Number(b.kernel.user_owned) - Number(a.kernel.user_owned));
 
     const preferred = preferredKernelId
       ? candidates.find(candidate => candidate.kernel.id === preferredKernelId && candidate.compatible)
@@ -64,7 +65,7 @@ export function packageNeedsNetwork(pkg) {
 }
 
 export function createDefaultKernelRegistry({ image, workspaceDir }) {
-  const base = {
+  const docker = {
     provider: 'docker',
     image,
     user: 'student',
@@ -82,41 +83,60 @@ export function createDefaultKernelRegistry({ image, workspaceDir }) {
   return new KernelRegistry({
     kernels: [
       {
-        ...base,
+        id: 'this-computer',
+        display_name: 'This computer',
+        provider: 'local',
+        user_owned: true,
+        workspace: workspaceDir,
+        platform: 'linux',
+        capabilities: ['tty', 'compile', 'debug', 'signals'],
+        commands: {
+          gcc: true,
+          gdb: true,
+          bash: true,
+          make: true,
+        },
+        network_default: 'none',
+      },
+      {
+        ...docker,
         id: 'gcc-ubuntu24-docker',
         display_name: 'GCC Ubuntu 24.04 (Docker)',
         network_default: 'none',
       },
       {
-        ...base,
+        ...docker,
         id: 'gcc-ubuntu24-docker-net',
         display_name: 'GCC Ubuntu 24.04 + preview ports (Docker)',
         network_default: 'bridge',
-        // Host binds these container ports to 127.0.0.1 ephemeral ports.
         publish_ports: [8080, 3000, 5173, 8000],
       },
     ],
   });
 }
 
-function kernelMatchesRequirements(kernel, requirements) {
+function kernelMatchesRequirements(kernel, requirements, { userOwned = false } = {}) {
   const requiredCapabilities = Array.isArray(requirements.capabilities) ? requirements.capabilities : [];
   const requiredCommands = requirements.commands && typeof requirements.commands === 'object'
     ? Object.keys(requirements.commands)
     : [];
 
-  const missingCapabilities = requiredCapabilities.filter(capability => !(kernel.capabilities || []).includes(capability));
+  const missingCapabilities = userOwned
+    ? []
+    : requiredCapabilities.filter(capability => !(kernel.capabilities || []).includes(capability));
   const missingCommands = requiredCommands.filter(command => !kernel.commands?.[command]);
-  const versionMismatches = requiredCommands
-    .filter(command => kernel.commands?.[command] && requirements.commands?.[command])
-    .map(command => {
-      const required = requirements.commands[command];
-      const found = kernel.commands[command];
-      if (commandVersionSatisfies(found, required)) return null;
-      return { command, required, found };
-    })
-    .filter(Boolean);
-  const platformOk = !requirements.platform || requirements.platform === kernel.platform;
+  const versionMismatches = userOwned
+    ? []
+    : requiredCommands
+      .filter(command => kernel.commands?.[command] && requirements.commands?.[command])
+      .map(command => {
+        const required = requirements.commands[command];
+        const found = kernel.commands[command];
+        if (commandVersionSatisfies(found, required)) return null;
+        return { command, required, found };
+      })
+      .filter(Boolean);
+  const platformOk = !requirements.platform || requirements.platform === kernel.platform || userOwned;
 
   return {
     ok: platformOk

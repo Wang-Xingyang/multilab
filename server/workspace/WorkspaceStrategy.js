@@ -10,8 +10,9 @@
  *                current step files/ dir — not an inner mount --bind)
  *   copy       — Windows NTFS / /mnt/c: RuntimeSession writeFiles/readFiles
  *
- * Do not bind-mount /mnt/c. Do not use the student's own WSL distro as a lab.
- * host-local remains an unused strategy kind, not a product path.
+ * host-local — player and lab are this computer: host save files/ is the
+ *              live workspace (symlink at ~/.multilab/workspace).
+ * Official Docker lab is still registered, but is not the default.
  */
 
 import { execFileSync } from 'child_process';

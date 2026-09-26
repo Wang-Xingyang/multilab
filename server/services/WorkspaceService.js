@@ -2,6 +2,7 @@ import path from 'path';
 import { LANG_BY_EXT, validateFileName, validateWorkspaceRelPath } from './PackageService.js';
 import {
   DEFAULT_WORKSPACE_LOCATION,
+  WORKSPACE_STRATEGY_KINDS,
   describeCopyStrategy,
   describeRuntimeInternalStrategy,
   resolveWorkspaceStrategy,
@@ -110,10 +111,13 @@ export class WorkspaceService {
     this.attachedHostPath = nextHost;
     await this.ensure({ tutorialId });
     const strategy = this.describe();
-    if (usesHostFilesystem(strategy) && containerPath) {
+    if (usesHostFilesystem(strategy) && (containerPath || nextHost)) {
       const session = await this.resolveSession(tutorialId);
       if (typeof session.pointWorkspace === 'function') {
-        await session.pointWorkspace(containerPath);
+        const target = strategy.kind === WORKSPACE_STRATEGY_KINDS.HOST_LOCAL
+          ? nextHost
+          : containerPath;
+        if (target) await session.pointWorkspace(target);
       }
       this.#restartWatchers();
       return;
@@ -294,7 +298,7 @@ export class WorkspaceService {
         handles.push(createFindPollingWatcher(session, onChange, {
           ...opts,
           intervalMs: handles.length ? (opts.intervalMs || 1200) : (opts.intervalMs || 1000),
-          workspaceDir: this.workspaceDir,
+          workspaceDir: session.workspaceDir || this.workspaceDir,
         }));
       } else if (!handles.length && typeof session.watchFilesystem === 'function') {
         handles.push(session.watchFilesystem(onChange, opts));

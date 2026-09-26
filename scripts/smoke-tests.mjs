@@ -39,6 +39,7 @@ import {
   wipeBindMountViaExec,
 } from '../server/workspace/HostWorkspace.js';
 import { RuntimeProvider, RuntimeSession } from '../server/runtime/RuntimeProvider.js';
+import { LocalRuntimeProvider } from '../server/runtime/LocalRuntimeProvider.js';
 import { RuntimeManager } from '../server/runtime/RuntimeManager.js';
 import {
   capturedTimeoutMs,
@@ -55,6 +56,7 @@ import {
   retargetWorkspaceScript,
   WORKSPACE_IDLE,
 } from '../server/runtime/learnerShellEnv.js';
+import { localRcFileContents } from '../server/runtime/localShellEnv.js';
 import { MlabSaveArchiveService } from '../server/services/MlabSaveArchiveService.js';
 import { KernelSelectionStore } from '../server/services/KernelSelectionStore.js';
 import { sanitizeUploadFilename } from '../server/services/TempArchiveUpload.js';
@@ -304,8 +306,8 @@ await test('KernelRegistry preferred kernel selection', () => {
   assert.equal(missing.preferred_applied, false);
   assert.equal(missing.selected.id, 'gcc-ubuntu24-docker');
   const ids = registry.listKernels().map(kernel => kernel.id).sort();
-  assert.deepEqual(ids, ['gcc-ubuntu24-docker', 'gcc-ubuntu24-docker-net']);
-  assert.ok(registry.listKernels().every(kernel => kernel.provider === 'docker'));
+  assert.deepEqual(ids, ['gcc-ubuntu24-docker', 'gcc-ubuntu24-docker-net', 'this-computer']);
+  assert.equal(registry.listKernels().find(k => k.id === 'this-computer').provider, 'local');
   const resolved = registry.resolveForPackage(pkg);
   assert.equal(resolved.selected.id, 'gcc-ubuntu24-docker');
 });
@@ -579,7 +581,7 @@ await test('SecurityPolicyService allows default hello-c path', async () => {
       kernelRegistry,
     });
     const auth = await policy.authorizeCommand({ tutorial: 'hello-c' });
-    assert.equal(auth.kernel.id, 'gcc-ubuntu24-docker');
+    assert.equal(auth.kernel.id, 'this-computer');
     assert.equal(auth.trust.trust, 'untrusted');
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
@@ -618,15 +620,54 @@ await test('KernelRegistry picks net kernel when network/preview ports required'
     security: { network_required: true },
   };
   const resolved = registry.resolveForPackage(netPkg);
-  assert.equal(resolved.selected.id, 'gcc-ubuntu24-docker-net');
+  assert.equal(resolved.selected.id, 'this-computer');
   assert.equal(resolved.network_required, true);
-  assert.ok(resolved.selected.publish_ports.includes(8080));
   const offline = registry.resolveForPackage({
     recommended_kernel: 'gcc-ubuntu24-docker',
     runtime_requirements: netPkg.runtime_requirements,
     security: { network_required: false },
   });
   assert.equal(offline.selected.id, 'gcc-ubuntu24-docker');
+});
+
+await test('local rcfile writes pid files without nested quotes', () => {
+  const rc = localRcFileContents({
+    workspace: '/home/wangxy/.multilab/workspace',
+    home: '/home/wangxy',
+    pidDir: '/home/wangxy/.multilab/shells',
+    genFile: '/home/wangxy/.multilab/ws-gen',
+  });
+  assert.equal(rc.includes(`> "'/home/wangxy/.multilab/shells'/`), false);
+  assert.equal(rc.includes("echo $$ > '/home/wangxy/.multilab/shells'/$$"), true);
+});
+
+await test('LocalRuntimeProvider points workspace and execs on this computer', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-local-'));
+  const link = path.join(tmp, 'workspace');
+  const filesDir = path.join(tmp, 'step-files');
+  try {
+    await fs.mkdir(filesDir, { recursive: true });
+    const provider = new LocalRuntimeProvider({
+      workspaceDir: '/home/student/workspace',
+      hostSavesDir: tmp,
+      workspaceLink: link,
+    });
+    await provider.applyKernel({ id: 'this-computer', workspace: '/home/student/workspace' });
+    const session = await provider.startSession();
+    await session.pointWorkspace(filesDir);
+    await session.writeFiles([{ name: 'hello.c', type: 'file', content: 'int x;\n' }]);
+    const listed = await session.readFiles();
+    assert.equal(listed.some(file => file.name === 'hello.c' && file.content.includes('int x')), true);
+    const ran = await session.exec(['bash', '-lc', 'pwd']);
+    assert.equal(ran.exitCode, 0);
+    const scriptPath = session.tempScriptPath('step', 'run');
+    await session.uploadScript('gcc /home/student/workspace/hello.c -o /tmp/nope\n', scriptPath);
+    const uploaded = await fs.readFile(scriptPath, 'utf8');
+    assert.equal(uploaded.includes('/home/student/workspace'), false);
+    assert.equal(uploaded.includes(link), true);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
 });
 
 console.log('\n--- WorkspaceService ---');
