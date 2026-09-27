@@ -132,7 +132,7 @@ function connectionFromBody(body = {}) {
 }
 
 async function switchKernelPreservingSaves(tutorial, kernelId) {
-  await workspaceService.flushLiveToHost();
+  if (runtimeManager.hasSession()) await workspaceService.flushLiveToHost();
   workspaceService.forgetLiveHost();
   const selected = await runtimeManager.selectKernelForTutorial(tutorial, kernelId);
   const cfg = await packageService.loadTutorial(tutorial);

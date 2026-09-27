@@ -6,6 +6,7 @@ import { state, currentTutorialKey } from './state.js';
 import { reconnectWS } from './terminal.js';
 import { refreshKernelResolution, renderKernelSelect } from './kernel.js';
 import { refreshFileTree } from './file-tree.js';
+import { enterStep } from './tutorial-loader.js';
 
 function kv(rows) {
   return `<div class="diag-kv">${rows.map(([k, v]) =>
@@ -113,6 +114,9 @@ async function connectSsh(tutorialKey) {
     refreshFileTree(false);
     const conn = result.connection || {};
     toast(t('lab.connected', { user: conn.username || '', host: conn.host || '' }));
+    if (state.currentTutorial) {
+      await enterStep(state.currentStep, { skipSave: true });
+    }
     await refreshDiagnosticsPane(tutorialKey);
   } catch (e) {
     handleError(e, {

@@ -1052,6 +1052,57 @@ await test('WorkspaceService path validation stays inside workspace root', () =>
   assert.throws(() => workspaceService.validatePath('/home/student/workspace/../etc/passwd'), /Access denied/);
 });
 
+function labUnconfiguredManager() {
+  const error = Object.assign(new Error('尚未连接实验机。请在诊断中连接 SSH。'), {
+    statusCode: 503,
+    code: 'lab_unconfigured',
+  });
+  return {
+    hasSession() { return false; },
+    getSession() { throw error; },
+    getActiveKernel() { return { id: SSH_KERNEL_ID, provider: 'ssh' }; },
+    getProviderForKernel() {
+      return { workspaceStrategy() { return describeCopyStrategy({ reason: 'ssh' }); } };
+    },
+    async ensureForTutorial() { throw error; },
+    async ensureForKernel() { throw error; },
+  };
+}
+
+await test('WorkspaceService flushLiveToHost skips when no runtime session', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-flush-'));
+  try {
+    const hostPath = path.join(tmp, 'save');
+    await fs.mkdir(hostPath);
+    const workspaceService = new WorkspaceService({ runtimeManager: labUnconfiguredManager() });
+    workspaceService.attachedHostPath = hostPath;
+    const result = await workspaceService.flushLiveToHost();
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, 'no-session');
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+await test('WorkspaceService useSaveWorkspace does not keep host path if lab is missing', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'multilab-attach-'));
+  try {
+    const hostPath = path.join(tmp, 'preview');
+    const workspaceService = new WorkspaceService({ runtimeManager: labUnconfiguredManager() });
+    await assert.rejects(
+      () => workspaceService.useSaveWorkspace({
+        tutorialId: 'hello-c',
+        hostPath,
+        files: [{ name: 'hello.c', content: 'int main(){}\n' }],
+      }),
+      /尚未连接实验机/
+    );
+    assert.equal(workspaceService.attachedHostPath, null);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 await test('WorkspaceService write/snapshot/list/read via memory session', async () => {
   const { session, files } = createMemoryWorkspaceSession();
   const workspaceService = new WorkspaceService({ runtimeSession: session });

@@ -113,8 +113,8 @@ export class WorkspaceService {
     if (this.attachedHostPath && usesCopyStrategy(this.describe())) {
       await this.flushLiveToHost({ hostPath: this.attachedHostPath, tutorialId });
     }
-    this.attachedHostPath = nextHost;
     await this.ensure({ tutorialId });
+    this.attachedHostPath = nextHost;
     const strategy = this.describe();
     if (usesHostFilesystem(strategy) && (containerPath || nextHost)) {
       const session = await this.resolveSession(tutorialId);
@@ -143,6 +143,9 @@ export class WorkspaceService {
     if (!dest) return { skipped: true, reason: 'no-host' };
     if (usesHostFilesystem(this.describe())) {
       return { skipped: true, reason: 'bind-mount' };
+    }
+    if (!this.#tryGetSession()) {
+      return { skipped: true, reason: 'no-session' };
     }
     const live = await this.snapshot({ tutorialId });
     await writeHostWorkspaceFiles({ hostPath: dest }, live, { clear: true });

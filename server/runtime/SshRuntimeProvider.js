@@ -461,7 +461,7 @@ async function buildAuth(connection, password) {
       }
     }
   }
-  if (cfg.useAgent) {
+  if (cfg.useAgent && !auth.privateKey) {
     const agent = defaultSshAgent();
     if (agent) auth.agent = agent;
   }
