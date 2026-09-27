@@ -1,3 +1,5 @@
+import { localLabSupported } from '../platform.js';
+
 export const LOCAL_KERNEL_ID = 'this-computer';
 export const SSH_KERNEL_ID = 'ssh-remote';
 
@@ -67,7 +69,11 @@ export function packageNeedsNetwork(pkg) {
   return Array.isArray(previewPorts) && previewPorts.length > 0;
 }
 
-export function createDefaultKernelRegistry({ image, workspaceDir }) {
+export function createDefaultKernelRegistry({
+  image,
+  workspaceDir,
+  platform = process.platform,
+} = {}) {
   const docker = {
     provider: 'docker',
     image,
@@ -90,6 +96,7 @@ export function createDefaultKernelRegistry({ image, workspaceDir }) {
         display_name: 'This computer',
         provider: 'local',
         user_owned: true,
+        implemented: localLabSupported(platform),
         workspace: workspaceDir,
         platform: 'linux',
         capabilities: ['tty', 'compile', 'debug', 'signals'],

@@ -49,11 +49,13 @@ export function sanitize(raw = {}) {
   };
 }
 
-export function expandHome(filePath) {
+export function expandHome(filePath, homedir = os.homedir()) {
   const raw = String(filePath || '').trim();
   if (!raw) return raw;
-  if (raw === '~') return os.homedir();
-  if (raw.startsWith('~/')) return path.join(os.homedir(), raw.slice(2));
+  if (raw === '~') return homedir;
+  if (raw.startsWith('~/') || raw.startsWith('~\\')) {
+    return path.join(homedir, raw.slice(2));
+  }
   return raw;
 }
 

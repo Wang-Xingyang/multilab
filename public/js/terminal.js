@@ -146,6 +146,10 @@ export function initWS() {
         reconnectWS({ reason: 'runtime replaced' });
         return;
       }
+      if (msg.code === 'lab_unconfigured' || msg.code === 'ssh_unconfigured' || msg.code === 'ssh_auth_missing') {
+        status(t('lab.needConnect'));
+        return;
+      }
       if (msg.code === 'step_inactive' || msg.code === 'step_stale') return;
       toast(msg.message, true);
       if (state.term) state.term.write(`\r\n\x1b[31m${t('ws.errorBanner', { error: msg.message })}\x1b[0m\r\n`);

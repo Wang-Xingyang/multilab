@@ -44,9 +44,26 @@ export class RuntimeManager {
 
   getSession() {
     if (!this.activeSession) {
-      throw Object.assign(new Error('runtime session is not ready'), { statusCode: 503 });
+      throw Object.assign(new Error('尚未连接实验机。请在诊断中连接 SSH。'), {
+        statusCode: 503,
+        code: 'lab_unconfigured',
+      });
     }
     return this.activeSession;
+  }
+
+  hasSession() {
+    return Boolean(this.activeSession);
+  }
+
+  async clearSession() {
+    const session = this.activeSession;
+    this.activeKernel = null;
+    this.activeSession = null;
+    this.activeFingerprint = null;
+    if (session && typeof session.dispose === 'function') {
+      await session.dispose();
+    }
   }
 
   getActiveKernel() {
@@ -75,13 +92,15 @@ export class RuntimeManager {
     return this.getProviderForKernel(kernel).probe(kernel);
   }
 
-  async ensureDefaultSession() {
-    const kernels = this.kernelRegistry.listKernels();
+  async ensureDefaultSession({ preferKernelId = null } = {}) {
+    const kernels = this.kernelRegistry.listKernels().filter(kernel => kernel.implemented !== false);
     if (!kernels.length) {
       throw new Error('No kernels registered');
     }
-    const implemented = kernels.find(kernel => kernel.implemented !== false) || kernels[0];
-    return this.ensureForKernel(implemented);
+    const preferred = preferKernelId
+      ? kernels.find(kernel => kernel.id === preferKernelId)
+      : null;
+    return this.ensureForKernel(preferred || kernels[0]);
   }
 
   async ensureForTutorial(tutorialKey) {

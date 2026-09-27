@@ -30,6 +30,7 @@ import { MlabSaveArchiveService } from './services/MlabSaveArchiveService.js';
 import { PackageLibrary } from './services/PackageLibrary.js';
 import { SecurityPolicyService } from './services/SecurityPolicyService.js';
 import { UPLOAD_LIMIT, withUploadedArchive } from './services/TempArchiveUpload.js';
+import { describePlayer, localLabSupported } from './platform.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -155,6 +156,59 @@ function runtimeSelectPayload(selected) {
   };
 }
 
+function playerPayload() {
+  return describePlayer();
+}
+
+async function dropSshSession() {
+  await workspaceService.flushLiveToHost();
+  workspaceService.forgetLiveHost();
+  await runtimeManager.clearSession();
+}
+
+async function bootRuntime() {
+  await sshRuntimeProvider.loadSavedConnection();
+  if (localLabSupported()) {
+    const local = kernelRegistry.listKernels().find(kernel => kernel.id === LOCAL_KERNEL_ID);
+    return runtimeManager.ensureForKernel(local);
+  }
+  const conn = sshRuntimeProvider.describeConnection();
+  if (conn.host && conn.username) {
+    try {
+      const ssh = kernelRegistry.listKernels().find(kernel => kernel.id === SSH_KERNEL_ID);
+      return await runtimeManager.ensureForKernel(ssh);
+    } catch (error) {
+      console.warn(`SSH lab not ready: ${error.message}`);
+      return { kernel: null, plan: null, error };
+    }
+  }
+  return { kernel: null, plan: null };
+}
+
+function logBootBanner(ensured) {
+  console.log(`\n  MultiLab running at  http://localhost:${PORT}\n`);
+  console.log(`  Player: ${process.platform}`);
+  const kernel = ensured?.kernel;
+  if (!kernel) {
+    console.log('  Lab: not connected — open Diagnostics to SSH into WSL / a Linux machine');
+    console.log('  Stop with Ctrl+C\n');
+    return;
+  }
+  console.log(`  Kernel: ${kernel.id} (${kernel.provider})`);
+  if (kernel.provider === 'docker') {
+    console.log(`  Container: ${CONTAINER_NAME} (${kernel.image || EXEC_IMAGE})`);
+    console.log(`  Network: ${ensured.plan?.networkMode || 'n/a'}  Sandbox: ${ensured.plan?.sandboxPreset || 'n/a'}`);
+  } else if (kernel.provider === 'ssh') {
+    const conn = sshRuntimeProvider.describeConnection();
+    console.log(`  Lab: ssh ${conn.username}@${conn.host}:${conn.port}`);
+  } else {
+    console.log('  Lab: this computer');
+  }
+  const workspace = ensured.plan?.workspaceStrategy || workspaceService.describe();
+  console.log(`  Workspace: ${workspace.kind}${workspace.hostPath ? ` → ${workspace.hostPath}` : ''}`);
+  console.log('  Stop with Ctrl+C\n');
+}
+
 // ---------- 1. Express ----------
 const app = express();
 app.use(express.json());
@@ -258,6 +312,7 @@ app.get('/api/diagnostics', async (req, res) => {
         workspace: workspaceService.describe(),
       },
       connection: sshRuntimeProvider.describeConnection(),
+      player: playerPayload(),
     });
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message });
@@ -302,6 +357,7 @@ app.get('/api/runtime', async (req, res) => {
       session_ready: sessionReady,
       port_map: portMap,
       workspace: workspaceService.describe(),
+      player: playerPayload(),
     });
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message });
@@ -332,7 +388,10 @@ app.post('/api/runtime/select', async (req, res) => {
 app.get('/api/lab/connection', async (req, res) => {
   try {
     await sshRuntimeProvider.loadSavedConnection();
-    res.json(sshRuntimeProvider.describeConnection());
+    res.json({
+      ...sshRuntimeProvider.describeConnection(),
+      player: playerPayload(),
+    });
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message, code: e.code });
   }
@@ -371,18 +430,18 @@ app.post('/api/lab/disconnect', async (req, res) => {
   try {
     const { tutorial } = req.body || {};
     const active = runtimeManager.getActiveKernel();
-    if (tutorial && active?.id === SSH_KERNEL_ID) {
-      await switchKernelPreservingSaves(tutorial, LOCAL_KERNEL_ID);
-    } else if (!tutorial && active?.id === SSH_KERNEL_ID) {
-      await workspaceService.flushLiveToHost();
-      workspaceService.forgetLiveHost();
-      const local = kernelRegistry.listKernels().find(kernel => kernel.id === LOCAL_KERNEL_ID);
-      if (local) await runtimeManager.ensureForKernel(local);
+    if (active?.id === SSH_KERNEL_ID) {
+      if (tutorial && localLabSupported()) {
+        await switchKernelPreservingSaves(tutorial, LOCAL_KERNEL_ID);
+      } else {
+        await dropSshSession();
+      }
     }
     const connection = await sshRuntimeProvider.disconnect();
     res.json({
       connection,
       kernel: runtimeManager.getActiveKernel(),
+      player: playerPayload(),
     });
   } catch (e) {
     res.status(e.statusCode || 502).json({ error: e.message, code: e.code || 'ssh_failed' });
@@ -665,6 +724,14 @@ wss.on('connection', (ws) => {
 
   (async () => {
     try {
+      if (!runtimeManager.hasSession()) {
+        send({
+          type: 'error',
+          message: '尚未连接实验机。请在诊断中连接 SSH。',
+          code: 'lab_unconfigured',
+        });
+        return;
+      }
       terminal = await getRuntimeSession().attachTerminal({
         onOutput(data) {
           send({ type: 'output', data });
@@ -790,26 +857,9 @@ wss.on('connection', (ws) => {
 });
 
 // ---------- 4. 启动 ----------
-sshRuntimeProvider.loadSavedConnection()
-  .then(() => runtimeManager.ensureDefaultSession())
+bootRuntime()
   .then(ensured => {
-    server.listen(PORT, () => {
-      const kernel = ensured.kernel;
-      console.log(`\n  MultiLab running at  http://localhost:${PORT}\n`);
-      console.log(`  Kernel: ${kernel.id} (${kernel.provider})`);
-      if (kernel.provider === 'docker') {
-        console.log(`  Container: ${CONTAINER_NAME} (${kernel.image || EXEC_IMAGE})`);
-        console.log(`  Network: ${ensured.plan?.networkMode || 'n/a'}  Sandbox: ${ensured.plan?.sandboxPreset || 'n/a'}`);
-      } else if (kernel.provider === 'ssh') {
-        const conn = sshRuntimeProvider.describeConnection();
-        console.log(`  Lab: ssh ${conn.username}@${conn.host}:${conn.port}`);
-      } else {
-        console.log(`  Lab: this computer`);
-      }
-      const workspace = ensured.plan?.workspaceStrategy || workspaceService.describe();
-      console.log(`  Workspace: ${workspace.kind}${workspace.hostPath ? ` → ${workspace.hostPath}` : ''}`);
-      console.log(`  Stop with Ctrl+C\n`);
-    });
+    server.listen(PORT, () => logBootBanner(ensured));
   })
   .catch(e => {
     console.error('\n❌ 启动失败:\n');

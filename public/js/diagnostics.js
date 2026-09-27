@@ -2,7 +2,7 @@ import { escapeAttr, toast, status } from './ui.js';
 import { t } from './messages.js';
 import { apiGet, apiJson } from './api.js';
 import { handleError } from './errors.js';
-import { currentTutorialKey } from './state.js';
+import { state, currentTutorialKey } from './state.js';
 import { reconnectWS } from './terminal.js';
 import { refreshKernelResolution, renderKernelSelect } from './kernel.js';
 import { refreshFileTree } from './file-tree.js';
@@ -21,15 +21,27 @@ function field({ id, label, type = 'text', value = '', placeholder = '', autocom
   </label>`;
 }
 
+function playerInfo(connection = {}) {
+  return connection.player || state.player || { platform: 'unknown', local_lab_supported: true };
+}
+
 function renderSshForm(connection = {}) {
   const connected = Boolean(connection.connected || connection.ready);
+  const player = playerInfo(connection);
+  const localOk = player.local_lab_supported !== false;
   const statusLabel = connected ? t('lab.statusOn') : t('lab.statusOff');
+  const hostPlaceholder = localOk ? t('lab.hostPlaceholder') : t('lab.hostPlaceholderLocal');
+  const hint = localOk ? '' : `<p class="diag-note">${escapeAttr(t('lab.wslHint'))}</p>`;
+  const localBtn = localOk
+    ? `<button type="button" class="hdr-btn ghost" id="ssh-local">${escapeAttr(t('lab.useLocal'))}</button>`
+    : '';
   return `
     <div class="diag-block" id="diag-ssh">
       <h4>${escapeAttr(t('lab.title'))}</h4>
       <p class="diag-note">${escapeAttr(statusLabel)}${connection.error ? ` — ${escapeAttr(connection.error)}` : ''}</p>
+      ${hint}
       <form class="diag-form" id="ssh-form">
-        ${field({ id: 'ssh-host', label: t('lab.host'), value: connection.host || '', placeholder: '192.168.1.10' })}
+        ${field({ id: 'ssh-host', label: t('lab.host'), value: connection.host || '', placeholder: hostPlaceholder })}
         ${field({ id: 'ssh-port', label: t('lab.port'), type: 'number', value: String(connection.port || 22) })}
         ${field({ id: 'ssh-user', label: t('lab.username'), value: connection.username || '', placeholder: 'student' })}
         ${field({
@@ -52,7 +64,7 @@ function renderSshForm(connection = {}) {
         <div class="diag-actions">
           <button type="submit" class="hdr-btn primary" id="ssh-connect">${escapeAttr(t('lab.connect'))}</button>
           <button type="button" class="hdr-btn ghost" id="ssh-disconnect">${escapeAttr(t('lab.disconnect'))}</button>
-          <button type="button" class="hdr-btn ghost" id="ssh-local">${escapeAttr(t('lab.useLocal'))}</button>
+          ${localBtn}
         </div>
       </form>
     </div>
@@ -120,7 +132,7 @@ async function disconnectSsh(tutorialKey) {
     await refreshKernelResolution();
     reconnectWS({ reason: 'this-computer' });
     refreshFileTree(false);
-    toast(t('lab.disconnected'));
+    toast(state.player?.local_lab_supported === false ? t('lab.disconnected') : t('lab.disconnectedLocal'));
     await refreshDiagnosticsPane(tutorialKey);
     return result;
   } catch (e) {
@@ -130,6 +142,13 @@ async function disconnectSsh(tutorialKey) {
       notify: true,
     });
   }
+}
+
+function formatProbeTools(commands) {
+  if (!commands || typeof commands !== 'object') return '—';
+  return Object.entries(commands)
+    .map(([name, version]) => `${name}:${version || 'missing'}`)
+    .join(' ') || '—';
 }
 
 export async function refreshDiagnosticsPane(tutorialKey) {
@@ -153,7 +172,7 @@ export async function refreshDiagnosticsPane(tutorialKey) {
       .slice(0, 8);
     const missing = (selected && data.resolution?.candidates?.find(c => c.id === selected.id)) || {};
     pane.innerHTML = `
-      ${renderSshForm(data.connection || {})}
+      ${renderSshForm({ ...(data.connection || {}), player: data.player || data.connection?.player })}
       <div class="diag-block">
         <h4>Package</h4>
         ${kv([
@@ -193,6 +212,8 @@ export async function refreshDiagnosticsPane(tutorialKey) {
           ['probe', data.runtime?.probe
             ? `${data.runtime.probe.ok ? 'ok' : 'not ready'} (${data.runtime.probe.reason || '—'})`
             : '—'],
+          ['tools', formatProbeTools(data.runtime?.probe?.details?.commands)],
+          ['player', data.player?.platform || state.player?.platform || '—'],
           ['active kernel', data.runtime?.active_kernel_id],
           ['fingerprint', data.runtime?.active_fingerprint],
           ['port map', JSON.stringify(data.runtime?.port_map || {})],

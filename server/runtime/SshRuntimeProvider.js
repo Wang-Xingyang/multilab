@@ -12,6 +12,7 @@ import {
   rewriteCanonicalWorkspace,
 } from './localShellEnv.js';
 import { expandHome, publicConnection, sanitize } from '../services/SshConnectionStore.js';
+import { defaultSshAgent } from '../platform.js';
 
 const { Client } = ssh2;
 const DEFAULT_IDENTITIES = ['id_ed25519', 'id_rsa', 'id_ecdsa'];
@@ -117,15 +118,19 @@ export class SshRuntimeProvider extends RuntimeProvider {
     }
     try {
       await this.session.ensure();
+      const commands = this.session.remoteTools
+        || await this.session.probeTools().catch(() => null);
+      const bash = Boolean(commands?.bash);
       return describeProbe({
-        ok: true,
+        ok: bash,
         implemented: true,
-        ready: true,
-        reason: 'ssh-ready',
+        ready: bash,
+        reason: bash ? 'ssh-ready' : 'bash-missing',
         details: {
           ...this.describeConnection(),
           workspace: this.session.workspaceLink,
           home: this.session.remoteHome,
+          commands,
         },
         capabilities,
       });
@@ -176,6 +181,27 @@ export class SshRuntimeSession extends RuntimeSession {
     this.workspaceDir = null;
     this.rcRemotePath = null;
     this.connectPromise = null;
+    this.remoteTools = null;
+  }
+
+  async probeTools() {
+    const names = ['bash', 'gcc', 'gdb', 'make'];
+    const commands = {};
+    for (const name of names) {
+      const result = await this.exec([
+        'bash',
+        '-lc',
+        `if command -v ${name} >/dev/null 2>&1; then ${name} --version 2>/dev/null | head -n1; else exit 127; fi`,
+      ], { cwd: this.remoteHome }).catch(() => ({ exitCode: 127, stdout: '' }));
+      if (result.exitCode === 0) {
+        const match = String(result.stdout || '').match(/[0-9]+(?:\.[0-9]+){0,3}/);
+        commands[name] = match ? match[0] : true;
+      } else {
+        commands[name] = null;
+      }
+    }
+    this.remoteTools = commands;
+    return commands;
   }
 
   getPortMap() {
@@ -304,6 +330,7 @@ export class SshRuntimeSession extends RuntimeSession {
     this.remoteHome = null;
     this.workspaceLink = null;
     this.workspaceDir = null;
+    this.remoteTools = null;
     if (client) {
       try { client.end(); } catch { /* already closed */ }
     }
@@ -332,6 +359,7 @@ export class SshRuntimeSession extends RuntimeSession {
       await this.#installRemoteRc();
       this.ready = true;
       this.lastError = null;
+      this.remoteTools = await this.probeTools().catch(() => null);
       return client;
     } catch (error) {
       this.lastError = error.message;
@@ -433,8 +461,9 @@ async function buildAuth(connection, password) {
       }
     }
   }
-  if (cfg.useAgent && process.env.SSH_AUTH_SOCK) {
-    auth.agent = process.env.SSH_AUTH_SOCK;
+  if (cfg.useAgent) {
+    const agent = defaultSshAgent();
+    if (agent) auth.agent = agent;
   }
   if (!auth.privateKey && !auth.password && !auth.agent) {
     const error = new Error('SSH needs a private key, ssh-agent, or password');

@@ -18,6 +18,7 @@ import { loadFilesIntoEditor, saveCurrentStep } from './files.js';
 import { handleError } from './errors.js';
 import { renderTutorialMarkdown } from './content-renderer.js';
 import { renderCatalog, setCatalogLabel } from './library.js';
+import { openHostDrawer } from './host-drawer.js';
 
 let lastRenderedStepId = null;
 let enterChain = Promise.resolve();
@@ -25,6 +26,14 @@ let latestEnter = null;
 
 function isStaleStepError(err) {
   return err?.code === 'step_inactive' || err?.code === 'step_stale';
+}
+
+function isLabConnectError(err) {
+  return err?.code === 'lab_unconfigured'
+    || err?.code === 'ssh_unconfigured'
+    || err?.code === 'ssh_auth_missing'
+    || err?.code === 'ssh_refused'
+    || err?.code === 'ssh_failed';
 }
 export function renderTutorialStepText() {
   const step = currentStepObj();
@@ -175,10 +184,11 @@ async function enterStepOnce(targetIndex, opts = {}) {
   } catch (e) {
     handleError(e, {
       feature: 'tutorial',
-      message: t('tutorial.switchFailed', { error: e.message }),
+      message: isLabConnectError(e) ? t('lab.needConnect') : t('tutorial.switchFailed', { error: e.message }),
       notify: true,
       log: true,
     });
+    if (isLabConnectError(e)) openHostDrawer();
     renderTutorialStepText();
   } finally {
     if (seq === state.stepLoadSeq) applyProgressToUi();

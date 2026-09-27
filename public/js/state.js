@@ -46,6 +46,10 @@ export const state = {
   fileTreeCollapsed: false,
   tutorialCollapsed: (typeof localStorage !== 'undefined' && localStorage.getItem('ml-tutorial-collapsed') === '1'),
   previewForcedOpen: false,
+  player: {
+    platform: 'unknown',
+    local_lab_supported: true,
+  },
 };
 
 export const FALLBACK_PANELS = [

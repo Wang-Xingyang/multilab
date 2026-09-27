@@ -15,6 +15,8 @@ import { fileURLToPath } from 'url';
 
 import { normalizePanels, resolveStepPanels, FALLBACK_PANELS } from '../server/services/PanelModel.js';
 import { createDefaultKernelRegistry, packageNeedsNetwork, SSH_KERNEL_ID } from '../server/services/KernelRegistry.js';
+import { expandHome } from '../server/services/SshConnectionStore.js';
+import { defaultSshAgent, localLabSupported } from '../server/platform.js';
 import { PackageService, validateWorkspaceRelPath, contentAssetResponseHeaders, stepAllowsReadOnlyCommand } from '../server/services/PackageService.js';
 import { SaveService } from '../server/services/SaveService.js';
 import {
@@ -292,6 +294,7 @@ await test('KernelRegistry preferred kernel selection', () => {
   const registry = createDefaultKernelRegistry({
     image: 'multilab/os:latest',
     workspaceDir: '/home/student/workspace',
+    platform: 'linux',
   });
   const pkg = {
     recommended_kernel: 'gcc-ubuntu24-docker',
@@ -314,6 +317,35 @@ await test('KernelRegistry preferred kernel selection', () => {
   assert.equal(registry.listKernels().find(k => k.id === SSH_KERNEL_ID).user_owned, true);
   const resolved = registry.resolveForPackage(pkg);
   assert.equal(resolved.selected.id, 'gcc-ubuntu24-docker');
+});
+
+await test('KernelRegistry disables this-computer on a Windows player', () => {
+  const registry = createDefaultKernelRegistry({
+    image: 'multilab/os:latest',
+    workspaceDir: '/home/student/workspace',
+    platform: 'win32',
+  });
+  const local = registry.listKernels().find(kernel => kernel.id === 'this-computer');
+  assert.equal(local.implemented, false);
+  const resolved = registry.resolveForPackage({
+    recommended_kernel: 'this-computer',
+    runtime_requirements: {
+      platform: 'linux',
+      capabilities: ['tty', 'compile'],
+      commands: { gcc: '>=13', bash: '>=5' },
+    },
+  });
+  assert.equal(resolved.selected.id, SSH_KERNEL_ID);
+});
+
+await test('player platform helpers expand Windows SSH agent and ~ paths', () => {
+  assert.equal(localLabSupported('linux'), true);
+  assert.equal(localLabSupported('win32'), false);
+  assert.equal(defaultSshAgent({ SSH_AUTH_SOCK: '/tmp/agent' }, 'linux'), '/tmp/agent');
+  assert.equal(defaultSshAgent({}, 'linux'), null);
+  assert.equal(defaultSshAgent({}, 'win32'), '\\\\.\\pipe\\openssh-ssh-agent');
+  assert.equal(expandHome('~/id_ed25519', '/home/u'), path.join('/home/u', 'id_ed25519'));
+  assert.equal(expandHome('~\\id_ed25519', 'C:\\Users\\u'), path.join('C:\\Users\\u', 'id_ed25519'));
 });
 
 await test('RuntimeSession.tempScriptPath lives on the session', () => {
@@ -578,6 +610,7 @@ await test('SecurityPolicyService allows default hello-c path', async () => {
     const kernelRegistry = createDefaultKernelRegistry({
       image: 'multilab/os:latest',
       workspaceDir: '/home/student/workspace',
+      platform: 'linux',
     });
     const policy = new SecurityPolicyService({
       packageService,
@@ -619,6 +652,7 @@ await test('KernelRegistry picks net kernel when network/preview ports required'
   const registry = createDefaultKernelRegistry({
     image: 'multilab/os:latest',
     workspaceDir: '/home/student/workspace',
+    platform: 'linux',
   });
   assert.equal(packageNeedsNetwork({ security: { preview_ports: [8080] } }), true);
   const netPkg = {

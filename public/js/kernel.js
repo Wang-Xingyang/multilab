@@ -39,6 +39,20 @@ function renderKernelSelect(resolution) {
   }
 }
 
+async function loadPlayerInfo() {
+  try {
+    const data = await apiGet('/api/runtime');
+    if (data?.player) {
+      state.player = {
+        platform: data.player.platform || 'unknown',
+        local_lab_supported: data.player.local_lab_supported !== false,
+      };
+    }
+  } catch (e) {
+    handleError(e, { feature: 'kernel', silent: true });
+  }
+}
+
 async function refreshKernelResolution() {
   if (!state.currentTutorial) {
     renderKernelSelect(null);
@@ -84,4 +98,5 @@ export {
   renderKernelSelect,
   refreshKernelResolution,
   selectKernel,
+  loadPlayerInfo,
 };

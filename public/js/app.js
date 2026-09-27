@@ -2,7 +2,7 @@ import { state, currentTutorialKey } from './state.js';
 import { t, applyStaticCopy } from './messages.js';
 import { toast } from './ui.js';
 import { initTheme } from './theme.js';
-import { renderTrustButton } from './kernel.js';
+import { renderTrustButton, loadPlayerInfo } from './kernel.js';
 import { initLayout } from './layout.js';
 import { initTerminal, initWS, reconnectWS, setFileTreeChangeCallback, applyTerminalInputGate } from './terminal.js';
 import {
@@ -43,7 +43,7 @@ initHostDrawer();
 initTutorialPicker();
 applyPanelLayout();
 initTerminal();
-initWS();
+loadPlayerInfo().finally(() => initWS());
 
 // 文件树自动刷新:
 // 1. host 推送 fs_change (真实文件变化, ~1s) → 即时刷新
